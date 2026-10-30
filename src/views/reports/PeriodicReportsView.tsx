@@ -3,7 +3,6 @@ import {
   FileBarChart2,
   Calendar,
   Building2,
-  Stethoscope,
   CheckCircle2,
   XCircle,
   AlertTriangle,
@@ -16,11 +15,17 @@ import {
   Database,
   ArrowRight,
   ShieldCheck,
-  Check
+  Check,
+  Layers,
+  PhoneCall,
+  GitCompare,
+  ArrowUpRight,
+  ArrowDownRight,
+  ExternalLink,
+  Table,
 } from 'lucide-react';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { api } from '../../api/client';
-
 import {
   readNavigationStateFromUrl,
   readPersistedBackupState,
@@ -63,6 +68,12 @@ export const PeriodicReportsView: React.FC = () => {
     if (backup.endDate) return backup.endDate;
     return new Date().toISOString().split('T')[0];
   });
+
+  const [compareMode, setCompareMode] = useState<boolean>(false);
+  const [copiedGoogleSheets, setCopiedGoogleSheets] = useState<boolean>(false);
+  const [reportData, setReportData] = useState<any>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [exporting, setExporting] = useState<boolean>(false);
 
   const setPeriod = (p: 'daily' | 'weekly' | 'monthly' | 'custom') => {
     setPeriodState(p);
@@ -112,6 +123,32 @@ export const PeriodicReportsView: React.FC = () => {
     }, 'replace');
   };
 
+  // Quick preset button handler
+  const applyPreset = (presetKey: 'today' | 'yesterday' | 'week' | 'month' | 'last30') => {
+    const today = new Date().toISOString().split('T')[0];
+    if (presetKey === 'today') {
+      setPeriod('daily');
+      setSelectedDate(today);
+    } else if (presetKey === 'yesterday') {
+      const y = new Date();
+      y.setDate(y.getDate() - 1);
+      setPeriod('daily');
+      setSelectedDate(y.toISOString().split('T')[0]);
+    } else if (presetKey === 'week') {
+      setPeriod('weekly');
+      setSelectedDate(today);
+    } else if (presetKey === 'month') {
+      setPeriod('monthly');
+      setSelectedDate(today);
+    } else if (presetKey === 'last30') {
+      const d30 = new Date();
+      d30.setDate(d30.getDate() - 30);
+      setPeriod('custom');
+      setCustomStartDate(d30.toISOString().split('T')[0]);
+      setCustomEndDate(today);
+    }
+  };
+
   // Sync state to URL on mount
   useEffect(() => {
     syncNavigationToUrlAndStorage({
@@ -123,10 +160,6 @@ export const PeriodicReportsView: React.FC = () => {
       endDate: customEndDate,
     }, 'replace');
   }, [activeCompany]);
-
-  const [reportData, setReportData] = useState<any>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [exporting, setExporting] = useState<boolean>(false);
 
   const fetchReport = async () => {
     try {
@@ -159,7 +192,7 @@ export const PeriodicReportsView: React.FC = () => {
     };
   }, [activeCompany, period, selectedDate, customStartDate, customEndDate]);
 
-  // Export current report data to structured CSV
+  // Export current report data to structured CSV (Section 11)
   const handleExportCsv = () => {
     if (!reportData) return;
     setExporting(true);
@@ -175,42 +208,54 @@ export const PeriodicReportsView: React.FC = () => {
           : `${selectedDate} (Monthly Window)`;
 
       const lines: string[] = [
-        `"Recruitment Operations & Screening Periodic Report"`,
+        `"Recruitment Operations & Analytics Periodic Report"`,
         `"Company Workspace","${activeCompany}"`,
         `"Reporting Period","${period.toUpperCase()}"`,
         `"Date Range / Reference Date","${dateRangeStr}"`,
         `"Reporting Basis","Application Date (Volume) / Current Status (Screening Outcomes)"`,
         `"Generated Timestamp","${now}"`,
         ``,
-        `"--- 1. OVERALL METRICS SUMMARY ---"`,
+        `"--- 1. OVERALL RECRUITMENT METRICS ---"`,
         `"Metric","Count","Notes"`,
-        `"Total Applications",${reportData.totalApplications || 0},"Total applications within reporting window"`,
+        `"Total Applications Screened",${reportData.totalApplications || 0},"Total applications within reporting window"`,
         `"Passed (Copy-Ready)",${reportData.passedCount || 0},"Approved for recruitment operations"`,
-        `"Failed Requirements",${reportData.failedCount || 0},"Ineligible based on work auth or legal screening"`,
+        `"Failed Requirements",${reportData.failedCount || 0},"Ineligible based on work auth or screening"`,
         `"Manual Review Queue",${reportData.manualReviewCount || 0},"Pending recruiter decision"`,
-        `"Duplicates / Re-uploads",${reportData.duplicateCount || 0},"Re-application to same job slot"`,
+        `"Transferred to Master DB",${reportData.transferredCount || 0},"Applications successfully entered Master DB"`,
+        `"Unique Candidates",${reportData.uniqueCandidatesCount || 0},"Distinct individual applicants"`,
+        `"Repeat Applications",${reportData.repeatApplicationsCount || 0},"Applications with prior submission history"`,
+        `"Duplicate Same-Job Re-uploads",${reportData.duplicateCount || 0},"Accidental re-uploads to exact same slot"`,
         `"Master Profiles Linked",${reportData.masterLinked || 0},"Unified master candidate identity linked"`,
-        `"Review Queue / Unlinked",${(reportData.needsReview || 0) + (reportData.unlinked || 0)},"Incomplete or identity review required"`,
-        `"Pass Rate","${reportData.passRate || 0}%","Passed / Total percentage"`,
+        `"Contact Attempts Logged",${reportData.contactAttemptsCount || 0},"Recruiter phone calls/contacts made"`,
+        `"Screening Pass Rate","${reportData.passRate || 0}%","Passed / Total percentage"`,
         ``,
-        `"--- 2. JOB REQUISITION PERFORMANCE ---"`,
-        `"Slot ID","Job Title","Total Applications","Passed","Manual Review","Failed","Pass Rate"`,
+        `"--- 2. TECHNOLOGY & JOB REQUISITION PERFORMANCE ---"`,
+        `"Slot ID","Requisition Title","Total Applications","Unique Candidates","Repeat Apps","Passed","Transferred","Manual Review","Failed","Pass Rate"`,
       ];
 
       if (reportData.jobSlotDistribution && Array.isArray(reportData.jobSlotDistribution)) {
         for (const slot of reportData.jobSlotDistribution) {
-          const rate = slot.total > 0 ? Math.round((slot.passed / slot.total) * 100) : 0;
           lines.push(
-            `"${slot.jobId}","${(slot.jobTitle || '').replace(/"/g, '""')}",${slot.total},${slot.passed},${slot.manualReview || 0},${slot.failed},"${rate}%"`
+            `"${slot.jobId}","${(slot.jobTitle || '').replace(/"/g, '""')}",${slot.total},${slot.uniqueCandidates || 0},${slot.repeatApplicants || 0},${slot.passed},${slot.transferred || 0},${slot.manualReview || 0},${slot.failed},"${slot.passRate || 0}%"`
           );
         }
       }
 
-      lines.push(``);
-      lines.push(`"--- 3. DAILY ACTIVITY TIMELINE ---"`);
-      lines.push(`"Date","Total Applications","Passed","Manual Review","Failed"`);
+      if (reportData.recruiterDistribution && Array.isArray(reportData.recruiterDistribution)) {
+        lines.push(``);
+        lines.push(`"--- 3. RECRUITER ACTIVITY SCORECARD ---"`);
+        lines.push(`"Recruiter Name","Leads Assigned","Contacts Made","Positive Feedback","Negative Feedback","Pending Contacts"`);
+        for (const r of reportData.recruiterDistribution) {
+          lines.push(
+            `"${r.recruiterName}",${r.leadsAssigned || 0},${r.contactsMade || 0},${r.positiveFeedbackCount || 0},${r.negativeFeedbackCount || 0},${r.pendingFeedbackCount || 0}`
+          );
+        }
+      }
 
       if (reportData.dailyBreakdown && Array.isArray(reportData.dailyBreakdown)) {
+        lines.push(``);
+        lines.push(`"--- 4. DAILY ACTIVITY TIMELINE ---"`);
+        lines.push(`"Date","Total Applications","Passed","Manual Review","Failed"`);
         for (const row of reportData.dailyBreakdown) {
           lines.push(`"${row.date}",${row.total},${row.passed},${row.manualReview || 0},${row.failed}`);
         }
@@ -233,30 +278,65 @@ export const PeriodicReportsView: React.FC = () => {
     }
   };
 
+  // One-click Copy Google Sheets Table (TSV)
+  const handleCopyGoogleSheets = () => {
+    if (!reportData) return;
+    const rows: string[][] = [
+      ['Slot ID', 'Requisition Title', 'Total Applications', 'Unique Candidates', 'Repeat Applications', 'Passed', 'Transferred to Master DB', 'Manual Review', 'Failed', 'Pass Rate'],
+    ];
+    if (reportData.jobSlotDistribution && Array.isArray(reportData.jobSlotDistribution)) {
+      for (const s of reportData.jobSlotDistribution) {
+        rows.push([
+          s.jobId || 'N/A',
+          s.jobTitle || 'Unspecified Role',
+          String(s.total || 0),
+          String(s.uniqueCandidates || 0),
+          String(s.repeatApplicants || 0),
+          String(s.passed || 0),
+          String(s.transferred || 0),
+          String(s.manualReview || 0),
+          String(s.failed || 0),
+          `${s.passRate || 0}%`,
+        ]);
+      }
+    }
+    const tsv = rows.map(r => r.join('\t')).join('\n');
+    navigator.clipboard.writeText(tsv).then(() => {
+      setCopiedGoogleSheets(true);
+      setTimeout(() => setCopiedGoogleSheets(false), 3000);
+    });
+  };
+
+  const navigateToMasterWithTech = (tech: string) => {
+    window.location.search = `?section=master-candidates&company=${activeCompany}&mTech=${encodeURIComponent(tech)}`;
+  };
+
+  const comparison = reportData?.comparison;
+
   return (
     <div className="space-y-6">
-      {/* Top Header & Filter Controls */}
+      {/* Top Header & Reporting Range Controls */}
       <div className="card-premium p-6">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
               <span className="badge-pass">
-                Reporting &amp; Reconciliation
+                Recruitment Analytics &amp; Reporting
               </span>
               <span className="text-slate-300">•</span>
-              <span className="text-xs font-medium text-slate-500">{activeCompany} Workspace</span>
+              <span className="text-xs font-semibold text-slate-600">{activeCompany} Workspace</span>
             </div>
             <h1 className="text-xl font-bold text-slate-900 tracking-tight mt-1">
               Periodic Recruitment &amp; Performance Reports
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Historical audits, screening outcomes, and master linking remain permanently preserved across all batches.
+              Multi-dimensional reporting across screening outcomes, candidate transfer rates, and recruiter activity.
             </p>
           </div>
 
-          {/* Timeframe & Date Picker */}
+          {/* Timeframe & Action Controls */}
           <div className="flex items-center flex-wrap gap-2.5">
-            {/* Period Selector */}
+            {/* Period Selector Tabs */}
             <div className="bg-slate-50 border border-slate-200 p-0.5 rounded-lg flex items-center text-xs font-medium">
               <button
                 type="button"
@@ -304,7 +384,7 @@ export const PeriodicReportsView: React.FC = () => {
               </button>
             </div>
 
-            {/* Date Pickers */}
+            {/* Date Inputs */}
             {period !== 'custom' ? (
               <div className="flex items-center gap-1.5 bg-[#F1F4F9] border border-[#E0E6EF] px-2.5 py-1.5 rounded-lg text-xs">
                 <Calendar className="w-3.5 h-3.5 text-[#8995A8]" />
@@ -333,7 +413,21 @@ export const PeriodicReportsView: React.FC = () => {
               </div>
             )}
 
-            {/* Export CSV Button (Primary Action) */}
+            {/* Google Sheets Copy */}
+            <button
+              type="button"
+              onClick={handleCopyGoogleSheets}
+              disabled={loading || !reportData}
+              className={`btn-secondary !py-1.5 !px-3 !text-xs shadow-xs flex items-center gap-1.5 ${
+                copiedGoogleSheets ? '!bg-emerald-50 !text-emerald-700 !border-emerald-300' : ''
+              }`}
+              title="Copy tab-delimited table ready to paste directly into Google Sheets"
+            >
+              {copiedGoogleSheets ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Table className="w-3.5 h-3.5 text-emerald-600" />}
+              <span>{copiedGoogleSheets ? 'Copied to Sheets!' : 'Copy for Google Sheets'}</span>
+            </button>
+
+            {/* Export CSV Button */}
             <button
               type="button"
               onClick={handleExportCsv}
@@ -357,46 +451,121 @@ export const PeriodicReportsView: React.FC = () => {
           </div>
         </div>
 
-        {/* Prominent Reporting Basis Banner */}
-        <div className="mt-4 pt-3 border-t border-[#E0E6EF] flex flex-wrap items-center justify-between text-[11px] text-[#65738B] gap-2">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-[#18243A]">Reporting Basis:</span>
-            <span>Application Date for Volume Reporting</span>
-            <span>•</span>
-            <span>Current Status for Screening Outcomes</span>
-            <span>•</span>
-            <span>Upload Timestamp for Import History</span>
+        {/* Quick Presets Bar & Comparison Mode Toggle */}
+        <div className="mt-4 pt-3 border-t border-[#E0E6EF] flex flex-wrap items-center justify-between text-xs gap-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-bold text-slate-500 mr-1">Quick Presets:</span>
+            <button
+              type="button"
+              onClick={() => applyPreset('today')}
+              className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold transition-colors cursor-pointer"
+            >
+              Today
+            </button>
+            <button
+              type="button"
+              onClick={() => applyPreset('yesterday')}
+              className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold transition-colors cursor-pointer"
+            >
+              Yesterday
+            </button>
+            <button
+              type="button"
+              onClick={() => applyPreset('week')}
+              className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold transition-colors cursor-pointer"
+            >
+              This Week (7D)
+            </button>
+            <button
+              type="button"
+              onClick={() => applyPreset('month')}
+              className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold transition-colors cursor-pointer"
+            >
+              This Month
+            </button>
+            <button
+              type="button"
+              onClick={() => applyPreset('last30')}
+              className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold transition-colors cursor-pointer"
+            >
+              Last 30 Days
+            </button>
           </div>
-          <div className="font-medium text-[#65738B]">
-            Company: <strong className="text-[#18243A]">{activeCompany}</strong> | Window: <strong className="text-[#18243A] capitalize">{period}</strong>
-          </div>
+
+          {/* Comparison Mode Toggle (Section 11) */}
+          <label className="flex items-center gap-2 cursor-pointer bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+            <input
+              type="checkbox"
+              checked={compareMode}
+              onChange={(e) => setCompareMode(e.target.checked)}
+              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+              <GitCompare className="w-3.5 h-3.5 text-blue-600" />
+              <span>Compare with Prior Period</span>
+            </span>
+          </label>
         </div>
       </div>
 
-      {/* Main Metric Cards (Pure White Surfaces with Restrained Status Accents) */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
+      {/* Main Metric Cards Grid (Section 11) */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3.5">
         {/* Total Applications */}
         <div className="card-premium p-4 hover:border-[#CBD5E1] transition-all">
-          <div className="text-xs text-[#65738B] font-medium mb-1">Total Applications</div>
+          <div className="text-xs text-[#65738B] font-medium mb-1">Total Screened</div>
           <div className="text-2xl font-bold text-[#18243A] tabular-nums">
             {loading ? '...' : (reportData?.totalApplications || 0).toLocaleString()}
           </div>
-          <div className="text-[11px] text-[#8995A8] mt-1 capitalize font-medium">{period} Window</div>
+          {compareMode && comparison && (
+            <div className={`text-[11px] mt-1 font-semibold flex items-center gap-0.5 ${comparison.deltas.total >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {comparison.deltas.total >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+              <span>{comparison.deltas.total >= 0 ? `+${comparison.deltas.total}` : comparison.deltas.total} vs prior</span>
+            </div>
+          )}
+          {!compareMode && (
+            <div className="text-[11px] text-[#8995A8] mt-1 capitalize font-medium">{period} window</div>
+          )}
         </div>
 
         {/* Passed (Copy-Ready) */}
         <div className="card-premium p-4 hover:border-[#CBD5E1] transition-all">
           <div className="text-xs text-[#65738B] font-semibold mb-1 flex items-center gap-1">
             <CheckCircle2 className="w-3.5 h-3.5 text-[#16836B]" />
-            <span>Passed (Copy-Ready)</span>
+            <span>Passed (Ready)</span>
           </div>
           <div className="text-2xl font-bold text-[#18243A] tabular-nums">
             {loading ? '...' : (reportData?.passedCount || 0).toLocaleString()}
           </div>
           <div className="text-[11px] text-[#16836B] mt-1 font-medium">
             {reportData && reportData.totalApplications > 0
-              ? `${Math.round((reportData.passedCount / reportData.totalApplications) * 100)}% pass rate`
+              ? `${reportData.passRate}% pass rate`
               : '0%'}
+          </div>
+        </div>
+
+        {/* Transferred to Master DB */}
+        <div className="card-premium p-4 hover:border-[#CBD5E1] transition-all bg-gradient-to-b from-purple-50/20 to-white">
+          <div className="text-xs text-purple-700 font-semibold mb-1 flex items-center gap-1">
+            <Database className="w-3.5 h-3.5 text-purple-600" />
+            <span>Transferred to DB</span>
+          </div>
+          <div className="text-2xl font-bold text-purple-900 tabular-nums">
+            {loading ? '...' : (reportData?.transferredCount || 0).toLocaleString()}
+          </div>
+          <div className="text-[11px] text-purple-600 mt-1 font-medium">Permanent profiles</div>
+        </div>
+
+        {/* Unique Candidates */}
+        <div className="card-premium p-4 hover:border-[#CBD5E1] transition-all">
+          <div className="text-xs text-[#65738B] font-semibold mb-1 flex items-center gap-1">
+            <Users className="w-3.5 h-3.5 text-blue-600" />
+            <span>Unique Candidates</span>
+          </div>
+          <div className="text-2xl font-bold text-[#18243A] tabular-nums">
+            {loading ? '...' : (reportData?.uniqueCandidatesCount || 0).toLocaleString()}
+          </div>
+          <div className="text-[11px] text-blue-600 mt-1 font-medium">
+            {reportData?.repeatApplicationsCount || 0} repeat apps
           </div>
         </div>
 
@@ -416,7 +585,7 @@ export const PeriodicReportsView: React.FC = () => {
         <div className="card-premium p-4 hover:border-[#CBD5E1] transition-all">
           <div className="text-xs text-[#65738B] font-semibold mb-1 flex items-center gap-1">
             <XCircle className="w-3.5 h-3.5 text-[#C44750]" />
-            <span>Failed Requirements</span>
+            <span>Failed Req.</span>
           </div>
           <div className="text-2xl font-bold text-[#18243A] tabular-nums">
             {loading ? '...' : (reportData?.failedCount || 0).toLocaleString()}
@@ -424,145 +593,83 @@ export const PeriodicReportsView: React.FC = () => {
           <div className="text-[11px] text-[#C44750] mt-1 font-medium">Legally ineligible</div>
         </div>
 
-        {/* Master Profiles Linked */}
+        {/* Contact Attempts Made */}
         <div className="card-premium p-4 hover:border-[#CBD5E1] transition-all">
           <div className="text-xs text-[#65738B] font-semibold mb-1 flex items-center gap-1">
-            <Database className="w-3.5 h-3.5 text-[#4A63C7]" />
-            <span>Master Profiles Linked</span>
+            <PhoneCall className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Contact Attempts</span>
           </div>
           <div className="text-2xl font-bold text-[#18243A] tabular-nums">
-            {loading ? '...' : (reportData?.masterLinked || 0).toLocaleString()}
+            {loading ? '...' : (reportData?.contactAttemptsCount || 0).toLocaleString()}
           </div>
-          <div className="text-[11px] text-[#4A63C7] mt-1 font-medium">Unique candidate CRM</div>
-        </div>
-
-        {/* Potential Duplicates */}
-        <div className="card-premium p-4 hover:border-[#CBD5E1] transition-all">
-          <div className="text-xs text-[#65738B] font-medium mb-1 flex items-center gap-1">
-            <Copy className="w-3.5 h-3.5 text-[#8995A8]" />
-            <span>Repeated Applications</span>
-          </div>
-          <div className="text-2xl font-bold text-[#18243A] tabular-nums">
-            {loading ? '...' : (reportData?.duplicateCount || 0).toLocaleString()}
-          </div>
-          <div className="text-[11px] text-[#8995A8] mt-1 font-medium">Same slot re-uploads</div>
+          <div className="text-[11px] text-slate-500 mt-1 font-medium">Logged recruiter calls</div>
         </div>
       </div>
 
-      {/* Outcome Breakdown & Daily Progression Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Screening Outcomes & Master Linking Status */}
-        <div className="card-premium p-5 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <span>Screening Outcomes &amp; Candidate Promotion</span>
-              </h3>
-              <p className="text-xs text-slate-500">Summary of decisions and database linking for {activeCompany}</p>
-            </div>
+      {/* Comparison Insights Banner (Section 11) */}
+      {compareMode && comparison && (
+        <div className="p-4 bg-blue-50/70 border border-blue-200 rounded-xl text-xs space-y-1.5 animate-fade-in">
+          <div className="font-bold text-blue-900 flex items-center gap-1.5">
+            <GitCompare className="w-4 h-4 text-blue-600" />
+            <span>Period-over-Period Performance Comparison ({activeCompany})</span>
           </div>
-
-          <div className="space-y-3">
-            <div className="p-3 rounded-lg bg-emerald-50/50 border border-emerald-200 flex items-center justify-between">
-              <div>
-                <div className="text-xs font-bold text-emerald-900">Approved &amp; Copy-Ready Leads</div>
-                <div className="text-[11px] text-emerald-700">Eligible to paste directly into recruiter Google Sheets</div>
-              </div>
-              <div className="text-xl font-bold text-emerald-800 tabular-nums">
-                {reportData?.passedCount || 0}
-              </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-slate-700 mt-1">
+            <div>
+              <span className="text-slate-500">Volume Delta: </span>
+              <strong className={comparison.deltas.total >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                {comparison.deltas.total >= 0 ? `+${comparison.deltas.total}` : comparison.deltas.total} applications
+              </strong>
+              <span className="text-slate-400 text-[10px] block">(Prior: {comparison.previousTotal})</span>
             </div>
-
-            <div className="p-3 rounded-lg bg-purple-50/50 border border-purple-200 flex items-center justify-between">
-              <div>
-                <div className="text-xs font-bold text-purple-900">Master Candidate Database Links</div>
-                <div className="text-[11px] text-purple-700">Applications linked to permanent candidate profiles</div>
-              </div>
-              <div className="text-xl font-bold text-purple-800 tabular-nums">
-                {reportData?.masterLinked || 0}
-              </div>
+            <div>
+              <span className="text-slate-500">Passed Delta: </span>
+              <strong className={comparison.deltas.passed >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                {comparison.deltas.passed >= 0 ? `+${comparison.deltas.passed}` : comparison.deltas.passed} leads
+              </strong>
+              <span className="text-slate-400 text-[10px] block">(Prior: {comparison.previousPassed})</span>
             </div>
-
-            <div className="p-3 rounded-lg bg-amber-50/50 border border-amber-200 flex items-center justify-between">
-              <div>
-                <div className="text-xs font-bold text-amber-900">Review Queue / Discrepancy</div>
-                <div className="text-[11px] text-amber-700">Uncertain matches or questions needing human review</div>
-              </div>
-              <div className="text-xl font-bold text-amber-800 tabular-nums">
-                {(reportData?.needsReview || 0) + (reportData?.manualReviewCount || 0)}
-              </div>
+            <div>
+              <span className="text-slate-500">Pass Rate Delta: </span>
+              <strong className={comparison.deltas.passRate >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                {comparison.deltas.passRate >= 0 ? `+${comparison.deltas.passRate}%` : `${comparison.deltas.passRate}%`}
+              </strong>
+              <span className="text-slate-400 text-[10px] block">(Prior: {comparison.previousPassRate}%)</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Transferred Delta: </span>
+              <strong className={comparison.deltas.transferred >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                {comparison.deltas.transferred >= 0 ? `+${comparison.deltas.transferred}` : comparison.deltas.transferred}
+              </strong>
+              <span className="text-slate-400 text-[10px] block">(Prior: {comparison.previousTransferred})</span>
             </div>
           </div>
         </div>
+      )}
 
-        {/* Daily Progression Breakdown */}
-        <div className="card-premium p-5 space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                <TrendingUp className="w-4 h-4 text-blue-600" />
-                <span>Daily Activity Progression</span>
-              </h3>
-              <p className="text-xs text-slate-500">Day-by-day volume and screening results</p>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="py-8 text-center text-xs text-slate-400">Loading activity timeline...</div>
-          ) : !reportData?.dailyBreakdown || reportData.dailyBreakdown.length === 0 ? (
-            <div className="py-8 text-center text-xs text-slate-400">
-              No activity logs recorded for this window.
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-slate-200/80">
-              <table className="w-full text-xs text-left table-premium">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 font-semibold bg-slate-50">
-                    <th className="py-2.5 px-3">Date</th>
-                    <th className="py-2.5 px-3 text-right">Total</th>
-                    <th className="py-2.5 px-3 text-right text-emerald-600">Passed</th>
-                    <th className="py-2.5 px-3 text-right text-amber-600">Review</th>
-                    <th className="py-2.5 px-3 text-right text-rose-600">Failed</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {reportData.dailyBreakdown.map((row: any, i: number) => (
-                    <tr key={i} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="py-2.5 px-3 font-mono text-slate-800 font-medium">{row.date}</td>
-                      <td className="py-2.5 px-3 text-right font-bold text-slate-900 tabular-nums">{row.total}</td>
-                      <td className="py-2.5 px-3 text-right text-emerald-600 font-semibold tabular-nums">{row.passed}</td>
-                      <td className="py-2.5 px-3 text-right text-amber-600 font-medium tabular-nums">{row.manualReview || 0}</td>
-                      <td className="py-2.5 px-3 text-right text-rose-600 font-medium tabular-nums">{row.failed}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Job Slot Distribution Table */}
+      {/* Job Requisition / Technology Performance Table (Section 13) */}
       <div className="card-premium p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
           <div>
             <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
               <Briefcase className="w-4 h-4 text-blue-600" />
-              <span>Job Requisitions Performance ({activeCompany})</span>
+              <span>Technology &amp; Job Requisition Performance ({activeCompany})</span>
             </h3>
-            <p className="text-xs text-slate-500">Applicant volumes, screening outcomes, and pass rates by job slot</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Breakdown of total applied, unique individuals, repeat submissions, and Master DB transfer rates by technology.
+            </p>
           </div>
-          <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-slate-100 text-slate-700">
-            {reportData?.jobSlotDistribution?.length || 0} Job Slots
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-slate-100 text-slate-700">
+              {reportData?.jobSlotDistribution?.length || 0} Requisitions
+            </span>
+          </div>
         </div>
 
         {loading ? (
-          <div className="py-8 text-center text-xs text-slate-400">Loading job distribution...</div>
+          <div className="py-8 text-center text-xs text-slate-400">Loading technology breakdown...</div>
         ) : !reportData?.jobSlotDistribution || reportData.jobSlotDistribution.length === 0 ? (
           <div className="py-8 text-center text-xs text-slate-400">
-            No applicant records available for these job slots.
+            No applicant records available for these job roles.
           </div>
         ) : (
           <div className="overflow-x-auto rounded-lg border border-slate-200/80">
@@ -570,33 +677,247 @@ export const PeriodicReportsView: React.FC = () => {
               <thead>
                 <tr className="border-b border-slate-200 text-slate-500 font-semibold bg-slate-50">
                   <th className="py-2.5 px-3">Slot ID</th>
-                  <th className="py-2.5 px-3">Requisition Title</th>
+                  <th className="py-2.5 px-3">Technology / Requisition</th>
                   <th className="py-2.5 px-3 text-right">Total Applied</th>
+                  <th className="py-2.5 px-3 text-right">Unique Cand.</th>
+                  <th className="py-2.5 px-3 text-right text-blue-600">Repeat Apps</th>
                   <th className="py-2.5 px-3 text-right text-emerald-600">Passed</th>
+                  <th className="py-2.5 px-3 text-right text-purple-600">Transferred</th>
                   <th className="py-2.5 px-3 text-right text-amber-600">Review</th>
-                  <th className="py-2.5 px-3 text-right text-rose-600">Failed</th>
-                  <th className="py-2.5 px-3 text-right">Pass Rate</th>
+                  <th className="py-2.5 px-3 text-right text-rose-500">Failed</th>
+                  <th className="py-2.5 px-3 text-center">Pass Rate</th>
+                  <th className="py-2.5 px-3 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {reportData.jobSlotDistribution.map((slot: any) => {
-                  const passRate = slot.total > 0 ? Math.round((slot.passed / slot.total) * 100) : 0;
+                  const passRate = slot.passRate !== undefined ? slot.passRate : (slot.total > 0 ? Math.round((slot.passed / slot.total) * 100) : 0);
                   return (
                     <tr key={slot.jobId} className="hover:bg-slate-50/70 transition-colors">
                       <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{slot.jobId}</td>
                       <td className="py-2.5 px-3 font-medium text-slate-800">{slot.jobTitle}</td>
                       <td className="py-2.5 px-3 text-right font-bold text-slate-900 tabular-nums">{slot.total}</td>
+                      <td className="py-2.5 px-3 text-right text-slate-700 tabular-nums">{slot.uniqueCandidates || slot.total}</td>
+                      <td className="py-2.5 px-3 text-right text-blue-600 font-semibold tabular-nums">{slot.repeatApplicants || 0}</td>
                       <td className="py-2.5 px-3 text-right font-bold text-emerald-600 tabular-nums">{slot.passed}</td>
+                      <td className="py-2.5 px-3 text-right font-bold text-purple-600 tabular-nums">{slot.transferred || 0}</td>
                       <td className="py-2.5 px-3 text-right font-medium text-amber-600 tabular-nums">{slot.manualReview || 0}</td>
                       <td className="py-2.5 px-3 text-right font-medium text-slate-400 tabular-nums">{slot.failed}</td>
-                      <td className="py-2.5 px-3 text-right tabular-nums">
-                        <span className={`font-bold ${passRate >= 50 ? 'text-emerald-700' : 'text-slate-600'}`}>
-                          {passRate}%
-                        </span>
+                      <td className="py-2.5 px-3 text-center tabular-nums">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <div className="w-12 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className={`h-full ${passRate >= 50 ? 'bg-emerald-500' : 'bg-slate-400'}`}
+                              style={{ width: `${Math.min(100, passRate)}%` }}
+                            />
+                          </div>
+                          <span className={`font-bold ${passRate >= 50 ? 'text-emerald-700' : 'text-slate-600'}`}>
+                            {passRate}%
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => navigateToMasterWithTech(slot.jobTitle)}
+                          className="px-2 py-0.5 rounded text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50 border border-blue-200 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                          title={`View all candidates matching ${slot.jobTitle} in Master Database`}
+                        >
+                          <span>Filter DB</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </button>
                       </td>
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Recruiter Activity & Scorecard (Section 11) */}
+      <div className="card-premium p-5 space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              <Users className="w-4 h-4 text-blue-600" />
+              <span>Recruiter Distribution &amp; Contact Activity ({activeCompany})</span>
+            </h3>
+            <p className="text-xs text-slate-500">Leads assigned, calls logged, and feedback outcomes for this timeframe</p>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="py-8 text-center text-xs text-slate-400">Loading recruiter scorecard...</div>
+        ) : !reportData?.recruiterDistribution || reportData.recruiterDistribution.length === 0 ? (
+          <div className="py-8 text-center text-xs text-slate-400">No recruiter assignments recorded.</div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-slate-200/80">
+            <table className="w-full text-xs text-left table-premium">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-500 font-semibold bg-slate-50">
+                  <th className="py-2.5 px-3">Recruiter Name</th>
+                  <th className="py-2.5 px-3">Recruiter Email</th>
+                  <th className="py-2.5 px-3 text-right">Leads Assigned</th>
+                  <th className="py-2.5 px-3 text-right text-blue-600">Contacts Made</th>
+                  <th className="py-2.5 px-3 text-right text-emerald-600">Positive Feedback</th>
+                  <th className="py-2.5 px-3 text-right text-rose-600">Negative Feedback</th>
+                  <th className="py-2.5 px-3 text-right text-amber-600">Pending Feedback</th>
+                  <th className="py-2.5 px-3 text-right">Last Assigned</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {reportData.recruiterDistribution.map((r: any) => (
+                  <tr key={r.recruiterName} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="py-2.5 px-3 font-semibold text-slate-900 capitalize">{r.recruiterName}</td>
+                    <td className="py-2.5 px-3 text-slate-500">{r.email || '—'}</td>
+                    <td className="py-2.5 px-3 text-right font-bold text-slate-900 tabular-nums">{r.leadsAssigned || 0}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-blue-600 tabular-nums">{r.contactsMade || 0}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-emerald-600 tabular-nums">{r.positiveFeedbackCount || 0}</td>
+                    <td className="py-2.5 px-3 text-right font-semibold text-rose-600 tabular-nums">{r.negativeFeedbackCount || 0}</td>
+                    <td className="py-2.5 px-3 text-right font-medium text-amber-600 tabular-nums">{r.pendingFeedbackCount || 0}</td>
+                    <td className="py-2.5 px-3 text-right text-slate-400 text-[11px] font-mono">
+                      {r.lastDistributedAt ? r.lastDistributedAt.split('T')[0] : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Cross-Technology Multi-Disciplinary Candidates (Section 13) */}
+      {reportData?.crossTechnology && reportData.crossTechnology.totalMultiTechCount > 0 && (
+        <div className="card-premium p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-purple-600" />
+                <span>Cross-Technology Movement &amp; Multi-Disciplinary Applicants ({activeCompany})</span>
+              </h3>
+              <p className="text-xs text-slate-500">
+                Candidates with applications across two or more distinct technology disciplines
+              </p>
+            </div>
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-purple-100 text-purple-800">
+              {reportData.crossTechnology.totalMultiTechCount} Multi-Tech Applicants
+            </span>
+          </div>
+
+          {/* Top Technology Pairings */}
+          {reportData.crossTechnology.technologyPairs && reportData.crossTechnology.technologyPairs.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 p-3 bg-purple-50/50 border border-purple-200/70 rounded-lg text-xs">
+              <span className="font-bold text-purple-900">Top Cross-Disciplinary Pairings:</span>
+              {reportData.crossTechnology.technologyPairs.slice(0, 5).map((p: any) => (
+                <span
+                  key={p.pair}
+                  className="px-2 py-0.5 rounded bg-white border border-purple-300 font-semibold text-purple-800 text-[11px] shadow-2xs"
+                >
+                  {p.pair} ({p.count})
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Sample Multi-Tech Candidates Table */}
+          <div className="overflow-x-auto rounded-lg border border-slate-200/80">
+            <table className="w-full text-xs text-left table-premium">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-500 font-semibold bg-slate-50">
+                  <th className="py-2.5 px-3">Candidate Name</th>
+                  <th className="py-2.5 px-3">Email &amp; Phone</th>
+                  <th className="py-2.5 px-3">Location</th>
+                  <th className="py-2.5 px-3">Distinct Technologies Applied</th>
+                  <th className="py-2.5 px-3 text-right">Total Apps</th>
+                  <th className="py-2.5 px-3 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {reportData.crossTechnology.multiTechCandidates.slice(0, 10).map((cand: any) => (
+                  <tr key={cand.id} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="py-2.5 px-3 font-semibold text-slate-900">{cand.full_name}</td>
+                    <td className="py-2.5 px-3 text-slate-600">
+                      <div>{cand.primary_email}</div>
+                      {cand.primary_phone && <div className="text-[11px] text-slate-400">{cand.primary_phone}</div>}
+                    </td>
+                    <td className="py-2.5 px-3 text-slate-600">{cand.location || '—'}</td>
+                    <td className="py-2.5 px-3">
+                      <div className="flex flex-wrap gap-1">
+                        {cand.technologiesList?.map((t: string) => (
+                          <span
+                            key={t}
+                            className="px-2 py-0.5 rounded bg-blue-50 border border-blue-200 text-blue-700 text-[11px] font-medium"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-bold text-slate-900 tabular-nums">
+                      {cand.total_applications}
+                    </td>
+                    <td className="py-2.5 px-3 text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          window.location.search = `?section=master-candidates&company=${activeCompany}&candId=${cand.id}&candTab=applications`;
+                        }}
+                        className="px-2 py-0.5 rounded text-[11px] font-semibold text-purple-700 hover:text-purple-900 hover:bg-purple-50 border border-purple-200 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>View Apps</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Daily Progression Breakdown */}
+      <div className="card-premium p-5 space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              <TrendingUp className="w-4 h-4 text-blue-600" />
+              <span>Daily Activity Timeline ({activeCompany})</span>
+            </h3>
+            <p className="text-xs text-slate-500">Day-by-day volume and screening results</p>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="py-8 text-center text-xs text-slate-400">Loading activity timeline...</div>
+        ) : !reportData?.dailyBreakdown || reportData.dailyBreakdown.length === 0 ? (
+          <div className="py-8 text-center text-xs text-slate-400">
+            No activity logs recorded for this window.
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-slate-200/80">
+            <table className="w-full text-xs text-left table-premium">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-500 font-semibold bg-slate-50">
+                  <th className="py-2.5 px-3">Date</th>
+                  <th className="py-2.5 px-3 text-right">Total Applications</th>
+                  <th className="py-2.5 px-3 text-right text-emerald-600">Passed</th>
+                  <th className="py-2.5 px-3 text-right text-amber-600">Review</th>
+                  <th className="py-2.5 px-3 text-right text-rose-600">Failed</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {reportData.dailyBreakdown.map((row: any, i: number) => (
+                  <tr key={i} className="hover:bg-slate-50/70 transition-colors">
+                    <td className="py-2.5 px-3 font-mono text-slate-800 font-medium">{row.date}</td>
+                    <td className="py-2.5 px-3 text-right font-bold text-slate-900 tabular-nums">{row.total}</td>
+                    <td className="py-2.5 px-3 text-right text-emerald-600 font-semibold tabular-nums">{row.passed}</td>
+                    <td className="py-2.5 px-3 text-right text-amber-600 font-medium tabular-nums">{row.manualReview || 0}</td>
+                    <td className="py-2.5 px-3 text-right text-rose-600 font-medium tabular-nums">{row.failed}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

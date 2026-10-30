@@ -2200,7 +2200,64 @@ export class DatabaseService {
     const distributed = overview.distributed || 0;
     const passRate = total > 0 ? Math.round((passed / total) * 100) : 0;
 
-    // Recruiter Distribution in period
+    // Unique Candidates in reporting period
+    const uniqueCandRow = (this.db.prepare(`
+      SELECT COUNT(DISTINCT COALESCE(NULLIF(email, ''), NULLIF(phone, ''), full_name)) as count
+      FROM applicants
+      WHERE company = ? ${dateFilter}
+    `).get(...dateParams) as any) || {};
+    const uniqueCandidatesCount = uniqueCandRow.count || 0;
+
+    // Repeat Applications in reporting period
+    const repeatRow = (this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM applicants a
+      WHERE a.company = ? ${dateFilter}
+        AND EXISTS (
+          SELECT 1 FROM applicants a2
+          WHERE a2.company = a.company
+            AND a2.id != a.id
+            AND (
+              (a2.email IS NOT NULL AND a2.email != '' AND a2.email = a.email) OR
+              (a2.phone IS NOT NULL AND a2.phone != '' AND a2.phone = a.phone)
+            )
+        )
+    `).get(...dateParams) as any) || {};
+    const repeatApplicationsCount = repeatRow.count || 0;
+
+    // Transferred applications to Master DB during this period
+    let transferDateFilter = '';
+    const transferParams: any[] = [company];
+    if (period === 'daily') {
+      transferDateFilter = "AND substr(transferred_at, 1, 10) = ?";
+      transferParams.push(targetDate);
+    } else if (period === 'weekly') {
+      transferDateFilter = "AND substr(transferred_at, 1, 10) >= date(?, '-7 days') AND substr(transferred_at, 1, 10) <= ?";
+      transferParams.push(targetDate, targetDate);
+    } else if (period === 'monthly') {
+      const monthPrefix = targetDate.slice(0, 7);
+      transferDateFilter = "AND substr(transferred_at, 1, 10) LIKE ?";
+      transferParams.push(`${monthPrefix}%`);
+    } else if (period === 'custom' && startDate && endDate) {
+      transferDateFilter = "AND substr(transferred_at, 1, 10) >= ? AND substr(transferred_at, 1, 10) <= ?";
+      transferParams.push(startDate, endDate);
+    }
+
+    const transferRow = (this.db.prepare(`
+      SELECT COUNT(*) as transferred
+      FROM master_transfers
+      WHERE company = ? AND transfer_status = 'TRANSFERRED' ${transferDateFilter}
+    `).get(...transferParams) as any) || {};
+
+    const masterLinkedPassed = (this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM applicants
+      WHERE company = ? AND master_person_id IS NOT NULL AND master_person_id != '' AND (review_decision = 'APPROVED' OR effective_result = 'PASS') ${dateFilter}
+    `).get(...dateParams) as any)?.count || 0;
+
+    const transferredCount = Math.max(transferRow.transferred || 0, masterLinkedPassed);
+
+    // Recruiter Distribution & Leads in period
     const recBreakdown = this.db.prepare(`
       SELECT
         assigned_recruiter as recruiterName,
@@ -2212,18 +2269,91 @@ export class DatabaseService {
       ORDER BY leadsAssigned DESC
     `).all(...dateParams) as any[];
 
+    // Recruiter Contacts and Outcomes in reporting window
+    let contactDateFilter = '';
+    const contactParams: any[] = [company];
+    if (period === 'daily') {
+      contactDateFilter = "AND (c.contact_date = ? OR substr(c.created_at, 1, 10) = ?)";
+      contactParams.push(targetDate, targetDate);
+    } else if (period === 'weekly') {
+      contactDateFilter = "AND ((c.contact_date >= date(?, '-7 days') AND c.contact_date <= ?) OR (substr(c.created_at, 1, 10) >= date(?, '-7 days') AND substr(c.created_at, 1, 10) <= ?))";
+      contactParams.push(targetDate, targetDate, targetDate, targetDate);
+    } else if (period === 'monthly') {
+      const monthPrefix = targetDate.slice(0, 7);
+      contactDateFilter = "AND (c.contact_date LIKE ? OR substr(c.created_at, 1, 10) LIKE ?)";
+      contactParams.push(`${monthPrefix}%`, `${monthPrefix}%`);
+    } else if (period === 'custom' && startDate && endDate) {
+      contactDateFilter = "AND ((c.contact_date >= ? AND c.contact_date <= ?) OR (substr(c.created_at, 1, 10) >= ? AND substr(c.created_at, 1, 10) <= ?))";
+      contactParams.push(startDate, endDate, startDate, endDate);
+    }
+
+    const contactRow = (this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM master_recruiter_contacts c
+      JOIN master_people p ON c.person_id = p.id OR c.person_id = p.person_id
+      WHERE p.company = ? ${contactDateFilter}
+    `).get(...contactParams) as any) || {};
+    const contactAttemptsCount = contactRow.count || 0;
+
+    const recContacts = this.db.prepare(`
+      SELECT
+        LOWER(TRIM(c.recruiter_name)) as recruiterKey,
+        COUNT(*) as contactsMade,
+        SUM(CASE 
+          WHEN (LOWER(c.outcome) LIKE '%interest%' AND LOWER(c.outcome) NOT LIKE '%not%')
+            OR (LOWER(c.feedback_1) LIKE '%interest%' AND LOWER(c.feedback_1) NOT LIKE '%not%')
+            OR (LOWER(c.feedback_2) LIKE '%interest%' AND LOWER(c.feedback_2) NOT LIKE '%not%')
+            OR LOWER(c.outcome) LIKE '%interview%'
+            OR LOWER(c.outcome) LIKE '%cleared%'
+            OR LOWER(c.outcome) LIKE '%scheduled%' THEN 1
+          ELSE 0
+        END) as positiveFeedbackCount,
+        SUM(CASE 
+          WHEN LOWER(c.outcome) LIKE '%not interest%'
+            OR LOWER(c.feedback_1) LIKE '%not interest%'
+            OR LOWER(c.feedback_2) LIKE '%not interest%'
+            OR LOWER(c.outcome) LIKE '%vm%'
+            OR LOWER(c.outcome) LIKE '%voicemail%'
+            OR LOWER(c.outcome) LIKE '%reject%'
+            OR LOWER(c.outcome) LIKE '%fail%' THEN 1
+          ELSE 0
+        END) as negativeFeedbackCount
+      FROM master_recruiter_contacts c
+      JOIN master_people p ON c.person_id = p.id OR c.person_id = p.person_id
+      WHERE p.company = ? ${contactDateFilter}
+      GROUP BY LOWER(TRIM(c.recruiter_name))
+    `).all(...contactParams) as any[];
+
+    const recContactMap = new Map<string, any>();
+    for (const rc of recContacts) {
+      recContactMap.set(rc.recruiterKey, rc);
+    }
+
     const allRecruiters = this.getRecruiters(company);
     const recruiterDistribution = allRecruiters.map(r => {
-      const found = recBreakdown.find(b => b.recruiterName === r.name);
+      const found = recBreakdown.find(b => (b.recruiterName || '').trim().toLowerCase() === r.name.toLowerCase());
+      const cStats = recContactMap.get(r.name.toLowerCase()) || {};
+      const leadsAssigned = found ? found.leadsAssigned : 0;
+      const contactsMade = cStats.contactsMade || 0;
+      const positiveFeedbackCount = cStats.positiveFeedbackCount || 0;
+      const negativeFeedbackCount = cStats.negativeFeedbackCount || 0;
+      const pendingFeedbackCount = Math.max(0, leadsAssigned - contactsMade);
+
       return {
         recruiterName: r.name,
+        recruiter: r.name,
         email: r.email,
-        leadsAssigned: found ? found.leadsAssigned : 0,
+        leadsAssigned,
+        count: leadsAssigned,
+        contactsMade,
+        positiveFeedbackCount,
+        negativeFeedbackCount,
+        pendingFeedbackCount,
         lastDistributedAt: found ? found.lastDistributedAt : undefined,
       };
     });
 
-    // Baseline job slot breakdown
+    // Baseline and dynamic job slot breakdown
     const jobRows = this.db.prepare(`
       SELECT
         COALESCE(job_id, 'N/A') as jobId,
@@ -2232,7 +2362,9 @@ export class DatabaseService {
         SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as passed,
         SUM(CASE WHEN effective_result = 'FAIL' THEN 1 ELSE 0 END) as failed,
         SUM(CASE WHEN effective_result = 'MANUAL_REVIEW' THEN 1 ELSE 0 END) as manualReview,
-        SUM(CASE WHEN review_decision = 'APPROVED' OR effective_result = 'PASS' THEN 1 ELSE 0 END) as approved
+        SUM(CASE WHEN review_decision = 'APPROVED' OR effective_result = 'PASS' THEN 1 ELSE 0 END) as approved,
+        SUM(CASE WHEN master_person_id IS NOT NULL AND master_person_id != '' AND (review_decision = 'APPROVED' OR effective_result = 'PASS') THEN 1 ELSE 0 END) as transferred,
+        COUNT(DISTINCT COALESCE(NULLIF(email, ''), NULLIF(phone, ''), full_name)) as uniqueCandidates
       FROM applicants
       WHERE company = ? ${dateFilter}
       GROUP BY job_id, job_title
@@ -2240,20 +2372,103 @@ export class DatabaseService {
     `).all(...dateParams) as any[];
 
     const baselineJobs = this.getBaselineJobs(company);
+    const matchedJobKeys = new Set<string>();
+
     const jobBreakdown = baselineJobs.map(bj => {
       const matched = jobRows.find(
         r => r.jobId === bj.jobId || r.jobTitle.toLowerCase().trim() === bj.jobTitle.toLowerCase().trim()
       );
+      if (matched) {
+        matchedJobKeys.add(matched.jobId);
+        matchedJobKeys.add(matched.jobTitle.toLowerCase().trim());
+      }
+      const totalCount = matched ? matched.total : 0;
+      const passedCount = matched ? matched.passed : 0;
+      const uniqueCandidates = matched ? matched.uniqueCandidates : 0;
+      const repeatApplicants = Math.max(0, totalCount - uniqueCandidates);
       return {
         jobId: bj.jobId,
         jobTitle: bj.jobTitle,
-        total: matched ? matched.total : 0,
-        passed: matched ? matched.passed : 0,
+        total: totalCount,
+        passed: passedCount,
         failed: matched ? matched.failed : 0,
         manualReview: matched ? matched.manualReview : 0,
         approved: matched ? matched.approved : 0,
+        transferred: matched ? matched.transferred : 0,
+        uniqueCandidates,
+        repeatApplicants,
+        passRate: totalCount > 0 ? Math.round((passedCount / totalCount) * 100) : 0,
       };
     });
+
+    // Add any dynamic job titles from applicants not in baselineJobs
+    for (const r of jobRows) {
+      if (!matchedJobKeys.has(r.jobId) && !matchedJobKeys.has(r.jobTitle.toLowerCase().trim())) {
+        const repeatCount = Math.max(0, r.total - (r.uniqueCandidates || 0));
+        jobBreakdown.push({
+          jobId: r.jobId,
+          jobTitle: r.jobTitle,
+          total: r.total,
+          passed: r.passed,
+          failed: r.failed,
+          manualReview: r.manualReview,
+          approved: r.approved,
+          transferred: r.transferred || 0,
+          uniqueCandidates: r.uniqueCandidates || 0,
+          repeatApplicants: repeatCount,
+          passRate: r.total > 0 ? Math.round((r.passed / r.total) * 100) : 0,
+        });
+      }
+    }
+
+    // Previous period comparison (Section 11)
+    let prevDateFilter = '';
+    const prevDateParams: any[] = [company];
+    if (period === 'daily') {
+      prevDateFilter = "AND application_date = date(?, '-1 day')";
+      prevDateParams.push(targetDate);
+    } else if (period === 'weekly') {
+      prevDateFilter = "AND application_date >= date(?, '-14 days') AND application_date < date(?, '-7 days')";
+      prevDateParams.push(targetDate, targetDate);
+    } else if (period === 'monthly') {
+      prevDateFilter = "AND application_date >= date(?, 'start of month', '-1 month') AND application_date < date(?, 'start of month')";
+      prevDateParams.push(targetDate, targetDate);
+    } else if (period === 'custom' && startDate && endDate) {
+      const diffDays = Math.max(1, Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000));
+      prevDateFilter = `AND application_date >= date(?, '-${diffDays} days') AND application_date < ?`;
+      prevDateParams.push(startDate, startDate);
+    }
+
+    let comparison: any = null;
+    if (prevDateFilter) {
+      const prevRow = (this.db.prepare(`
+        SELECT
+          COUNT(*) as total,
+          SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as passed,
+          SUM(CASE WHEN review_decision = 'APPROVED' OR effective_result = 'PASS' THEN 1 ELSE 0 END) as approved,
+          SUM(CASE WHEN master_person_id IS NOT NULL AND master_person_id != '' AND (review_decision = 'APPROVED' OR effective_result = 'PASS') THEN 1 ELSE 0 END) as transferred
+        FROM applicants
+        WHERE company = ? ${prevDateFilter}
+      `).get(...prevDateParams) as any) || {};
+
+      const prevTotal = prevRow.total || 0;
+      const prevPassed = prevRow.passed || 0;
+      const prevTransferred = prevRow.transferred || 0;
+      const prevPassRate = prevTotal > 0 ? Math.round((prevPassed / prevTotal) * 100) : 0;
+
+      comparison = {
+        previousTotal: prevTotal,
+        previousPassed: prevPassed,
+        previousPassRate: prevPassRate,
+        previousTransferred: prevTransferred,
+        deltas: {
+          total: total - prevTotal,
+          passed: passed - prevPassed,
+          passRate: passRate - prevPassRate,
+          transferred: transferredCount - prevTransferred,
+        },
+      };
+    }
 
     // Daily Trend
     const trendRows = this.db.prepare(`
@@ -2269,6 +2484,9 @@ export class DatabaseService {
       ORDER BY date DESC
       LIMIT 14
     `).all(company) as any[];
+
+    // Cross-Technology Analytics (Section 13)
+    const crossTechnology = this.getCrossTechnologyAnalytics(company);
 
     return {
       timeframe: period,
@@ -2286,15 +2504,73 @@ export class DatabaseService {
       needsReview: overview.needsReview || 0,
       unlinked: overview.unlinked || 0,
       passRate,
-      recruiterDistribution: recruiterDistribution.map(r => ({
-        ...r,
-        recruiter: r.recruiterName,
-        count: r.leadsAssigned,
-      })),
+      uniqueCandidatesCount,
+      repeatApplicationsCount,
+      transferredCount,
+      contactAttemptsCount,
+      comparison,
+      recruiterDistribution,
       jobBreakdown,
       jobSlotDistribution: jobBreakdown,
+      crossTechnology,
       dailyTrend: trendRows,
       dailyBreakdown: trendRows,
+    };
+  }
+
+  // --- Cross-Technology Analytics (Section 13) ---
+  getCrossTechnologyAnalytics(company: 'AaraTech' | 'ClinisolTech' = 'AaraTech'): {
+    multiTechCandidates: any[];
+    totalMultiTechCount: number;
+    technologyPairs: { pair: string; count: number }[];
+  } {
+    const candidates = this.db.prepare(`
+      SELECT 
+        p.id,
+        p.person_id,
+        p.full_name,
+        p.primary_email,
+        p.primary_phone,
+        p.location,
+        p.current_title,
+        p.current_owner,
+        COUNT(DISTINCT ma.job_title) as tech_count,
+        GROUP_CONCAT(DISTINCT ma.job_title) as technologies,
+        COUNT(ma.id) as total_applications
+      FROM master_people p
+      JOIN master_applications ma ON (ma.person_id = p.id OR ma.person_id = p.person_id)
+      WHERE p.company = ? AND ma.job_title IS NOT NULL AND TRIM(ma.job_title) != ''
+      GROUP BY p.id
+      HAVING COUNT(DISTINCT ma.job_title) > 1
+      ORDER BY tech_count DESC, total_applications DESC
+      LIMIT 100
+    `).all(company) as any[];
+
+    const pairCounts = new Map<string, number>();
+    for (const c of candidates) {
+      if (c.technologies) {
+        const techs = c.technologies.split(',').map((t: string) => t.trim()).filter(Boolean).sort();
+        for (let i = 0; i < techs.length; i++) {
+          for (let j = i + 1; j < techs.length; j++) {
+            const pairKey = `${techs[i]} ↔ ${techs[j]}`;
+            pairCounts.set(pairKey, (pairCounts.get(pairKey) || 0) + 1);
+          }
+        }
+      }
+    }
+
+    const technologyPairs = Array.from(pairCounts.entries())
+      .map(([pair, count]) => ({ pair, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    return {
+      multiTechCandidates: candidates.map(c => ({
+        ...c,
+        technologiesList: c.technologies ? c.technologies.split(',').map((t: string) => t.trim()) : [],
+      })),
+      totalMultiTechCount: candidates.length,
+      technologyPairs,
     };
   }
 
@@ -4279,6 +4555,44 @@ export class DatabaseService {
     };
   }
 
+  getMasterCandidateTechnologies(company?: string): string[] {
+    const params: any[] = [];
+    const hasCompany = Boolean(company && company !== 'All' && company !== 'Both');
+    const companyWhereClause = hasCompany ? 'WHERE company = ? AND' : 'WHERE';
+    if (hasCompany) {
+      params.push(company);
+    }
+
+    const appTitles = this.db.prepare(`
+      SELECT DISTINCT job_title as title
+      FROM master_applications
+      ${companyWhereClause} job_title IS NOT NULL AND TRIM(job_title) != ''
+    `).all(...params) as any[];
+
+    const peopleTitles = this.db.prepare(`
+      SELECT DISTINCT current_title as title
+      FROM master_people
+      ${companyWhereClause} current_title IS NOT NULL AND TRIM(current_title) != ''
+    `).all(...params) as any[];
+
+    const applicantTitles = this.db.prepare(`
+      SELECT DISTINCT job_title as title
+      FROM applicants
+      ${companyWhereClause} job_title IS NOT NULL AND TRIM(job_title) != ''
+    `).all(...params) as any[];
+
+    const titlesSet = new Set<string>();
+    for (const r of [...appTitles, ...peopleTitles, ...applicantTitles]) {
+      if (r.title && typeof r.title === 'string') {
+        const clean = r.title.trim();
+        if (clean && clean !== 'N/A' && clean !== 'Position') {
+          titlesSet.add(clean);
+        }
+      }
+    }
+    return Array.from(titlesSet).sort();
+  }
+
   getMasterCandidates(params: string | {
     page?: number;
     pageSize?: number;
@@ -4288,6 +4602,12 @@ export class DatabaseService {
     owner?: string;
     gender?: string;
     contactFilter?: string;
+    technology?: string;
+    repeatFilter?: string;
+    h1bStatus?: string;
+    greenCard?: string;
+    hasResume?: boolean;
+    hasLinkedIn?: boolean;
     dateFrom?: string;
     dateTo?: string;
     sortBy?: string;
@@ -4295,7 +4615,7 @@ export class DatabaseService {
   } = {}): { candidates: any[]; totalCount: number } {
     const opts = typeof params === 'string' ? { company: params } : (params || {});
     const page = Math.max(1, Number(opts.page) || 1);
-    const pageSize = Math.min(500, Math.max(1, Number(opts.pageSize) || 50));
+    const pageSize = Math.min(10000, Math.max(1, Number(opts.pageSize) || 50));
     const offset = (page - 1) * pageSize;
 
     const conditions: string[] = [];
@@ -4338,6 +4658,80 @@ export class DatabaseService {
       conditions.push("(p.primary_phone IS NULL OR p.primary_phone = '')");
     } else if (opts.contactFilter === 'missing_email') {
       conditions.push("(p.primary_email IS NULL OR p.primary_email = '')");
+    }
+
+    // Technology / Role Filter (Section 12)
+    if (opts.technology && opts.technology !== 'All') {
+      conditions.push(`(
+        p.current_title LIKE ? OR
+        EXISTS (
+          SELECT 1 FROM master_applications ma
+          WHERE (ma.person_id = p.id OR ma.person_id = p.person_id)
+            AND (ma.job_title LIKE ? OR ma.technology LIKE ?)
+        ) OR
+        EXISTS (
+          SELECT 1 FROM applicants a
+          WHERE a.master_person_id = p.id
+            AND a.job_title LIKE ?
+        )
+      )`);
+      const techPattern = `%${opts.technology.trim()}%`;
+      values.push(techPattern, techPattern, techPattern, techPattern);
+    }
+
+    // Repeat Applicant Filter (Section 12 & 19)
+    if (opts.repeatFilter === 'repeat_only') {
+      conditions.push(`(
+        (SELECT COUNT(*) FROM master_applications ma WHERE ma.person_id = p.id OR ma.person_id = p.person_id) > 1 OR
+        (SELECT COUNT(*) FROM applicants a WHERE a.master_person_id = p.id) > 1
+      )`);
+    } else if (opts.repeatFilter === 'first_time_only') {
+      conditions.push(`(
+        (SELECT COUNT(*) FROM master_applications ma WHERE ma.person_id = p.id OR ma.person_id = p.person_id) <= 1 AND
+        (SELECT COUNT(*) FROM applicants a WHERE a.master_person_id = p.id) <= 1
+      )`);
+    }
+
+    // H1B Sponsorship Filter (Section 12)
+    if (opts.h1bStatus === 'No') {
+      conditions.push(`(LOWER(p.h1b_status) LIKE '%no%' OR p.h1b_status = '0')`);
+    } else if (opts.h1bStatus === 'Yes') {
+      conditions.push(`(LOWER(p.h1b_status) LIKE '%yes%' OR p.h1b_status = '1')`);
+    }
+
+    // Green Card / US-C Filter (Section 12)
+    if (opts.greenCard === 'Yes') {
+      conditions.push(`(LOWER(p.green_card) LIKE '%yes%' OR LOWER(p.green_card) LIKE '%usc%' OR LOWER(p.green_card) LIKE '%gc%' OR p.green_card = '1')`);
+    } else if (opts.greenCard === 'No') {
+      conditions.push(`(LOWER(p.green_card) LIKE '%no%' OR p.green_card = '0')`);
+    }
+
+    // Has Resume Filter
+    if (opts.hasResume) {
+      conditions.push(`(p.resume_url IS NOT NULL AND TRIM(p.resume_url) != '')`);
+    }
+
+    // Has LinkedIn Filter
+    if (opts.hasLinkedIn) {
+      conditions.push(`(p.linkedin_url IS NOT NULL AND TRIM(p.linkedin_url) != '')`);
+    }
+
+    // Date Range Filter (Applied Date, Collected Date, or Created Date)
+    if (opts.dateFrom) {
+      conditions.push(`(
+        EXISTS (SELECT 1 FROM master_applications ma WHERE (ma.person_id = p.id OR ma.person_id = p.person_id) AND ma.date_applied >= ?) OR
+        substr(p.created_at, 1, 10) >= ? OR
+        p.application_collected_date >= ?
+      )`);
+      values.push(opts.dateFrom, opts.dateFrom, opts.dateFrom);
+    }
+    if (opts.dateTo) {
+      conditions.push(`(
+        EXISTS (SELECT 1 FROM master_applications ma WHERE (ma.person_id = p.id OR ma.person_id = p.person_id) AND ma.date_applied <= ?) OR
+        substr(p.created_at, 1, 10) <= ? OR
+        p.application_collected_date <= ?
+      )`);
+      values.push(opts.dateTo, opts.dateTo, opts.dateTo);
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

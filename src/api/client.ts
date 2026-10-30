@@ -1050,6 +1050,12 @@ export const api = {
     owner?: string;
     gender?: string;
     contactFilter?: string;
+    technology?: string;
+    repeatFilter?: string;
+    h1bStatus?: string;
+    greenCard?: string;
+    hasResume?: boolean;
+    hasLinkedIn?: boolean;
     dateFrom?: string;
     dateTo?: string;
     sortBy?: string;
@@ -1064,6 +1070,12 @@ export const api = {
     if (params?.owner && params.owner !== 'All') query.set('owner', params.owner);
     if (params?.gender && params.gender !== 'All') query.set('gender', params.gender);
     if (params?.contactFilter && params.contactFilter !== 'all') query.set('contactFilter', params.contactFilter);
+    if (params?.technology && params.technology !== 'All') query.set('technology', params.technology);
+    if (params?.repeatFilter && params.repeatFilter !== 'all') query.set('repeatFilter', params.repeatFilter);
+    if (params?.h1bStatus && params.h1bStatus !== 'All') query.set('h1bStatus', params.h1bStatus);
+    if (params?.greenCard && params.greenCard !== 'All') query.set('greenCard', params.greenCard);
+    if (params?.hasResume) query.set('hasResume', 'true');
+    if (params?.hasLinkedIn) query.set('hasLinkedIn', 'true');
     if (params?.dateFrom) query.set('dateFrom', params.dateFrom);
     if (params?.dateTo) query.set('dateTo', params.dateTo);
     if (params?.sortBy) query.set('sortBy', params.sortBy);
@@ -1082,6 +1094,70 @@ export const api = {
       totalCount: number;
       page: number;
       pageSize: number;
+    }>;
+  },
+
+  getMasterCandidateTechnologies: async (company?: string) => {
+    const query = new URLSearchParams();
+    if (company && company !== 'All' && company !== 'Both') query.set('company', company);
+    const res = await fetch(`/api/master-candidates/technologies?${query.toString()}`, {
+      headers: company && company !== 'All' && company !== 'Both' ? { 'x-company': company } : {},
+    });
+    if (!res.ok) return { success: false, technologies: [] };
+    return res.json() as Promise<{ success: boolean; technologies: string[] }>;
+  },
+
+  exportMasterCandidatesCsv: (params?: {
+    search?: string;
+    company?: string;
+    status?: string;
+    owner?: string;
+    gender?: string;
+    contactFilter?: string;
+    technology?: string;
+    repeatFilter?: string;
+    h1bStatus?: string;
+    greenCard?: string;
+    hasResume?: boolean;
+    hasLinkedIn?: boolean;
+    dateFrom?: string;
+    dateTo?: string;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.search) query.set('search', params.search);
+    if (params?.company && params.company !== 'All' && params.company !== 'Both') query.set('company', params.company);
+    if (params?.status && params.status !== 'All') query.set('status', params.status);
+    if (params?.owner && params.owner !== 'All') query.set('owner', params.owner);
+    if (params?.gender && params.gender !== 'All') query.set('gender', params.gender);
+    if (params?.contactFilter && params.contactFilter !== 'all') query.set('contactFilter', params.contactFilter);
+    if (params?.technology && params.technology !== 'All') query.set('technology', params.technology);
+    if (params?.repeatFilter && params.repeatFilter !== 'all') query.set('repeatFilter', params.repeatFilter);
+    if (params?.h1bStatus && params.h1bStatus !== 'All') query.set('h1bStatus', params.h1bStatus);
+    if (params?.greenCard && params.greenCard !== 'All') query.set('greenCard', params.greenCard);
+    if (params?.hasResume) query.set('hasResume', 'true');
+    if (params?.hasLinkedIn) query.set('hasLinkedIn', 'true');
+    if (params?.dateFrom) query.set('dateFrom', params.dateFrom);
+    if (params?.dateTo) query.set('dateTo', params.dateTo);
+    if (params?.sortBy) query.set('sortBy', params.sortBy);
+    if (params?.sortOrder) query.set('sortOrder', params.sortOrder);
+
+    window.location.href = `/api/master-candidates/export-csv?${query.toString()}`;
+  },
+
+  getCrossTechnologyAnalytics: async (company?: string) => {
+    const query = new URLSearchParams();
+    if (company && company !== 'All' && company !== 'Both') query.set('company', company);
+    const res = await fetch(`/api/reports/cross-technology?${query.toString()}`, {
+      headers: company && company !== 'All' && company !== 'Both' ? { 'x-company': company } : {},
+    });
+    if (!res.ok) return { success: false, multiTechCandidates: [], totalMultiTechCount: 0, technologyPairs: [] };
+    return res.json() as Promise<{
+      success: boolean;
+      multiTechCandidates: any[];
+      totalMultiTechCount: number;
+      technologyPairs: { pair: string; count: number }[];
     }>;
   },
 

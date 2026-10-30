@@ -821,6 +821,10 @@ export const dbService = {
     status?: string;
     owner?: string;
     jobTitle?: string;
+    technology?: string;
+    repeatFilter?: string;
+    h1bStatus?: string;
+    greenCard?: string;
     hasResume?: boolean;
     hasLinkedIn?: boolean;
     gender?: string;
@@ -837,7 +841,10 @@ export const dbService = {
 
     // 1. Primary permanent store: Backend SQLite Master Database API
     try {
-      const apiRes = await api.getMasterCandidates(params);
+      const apiRes = await api.getMasterCandidates({
+        ...params,
+        technology: params.technology || params.jobTitle,
+      });
       if (apiRes && apiRes.success) {
         // Authoritative backend response received
         if (apiRes.totalCount === 0) {

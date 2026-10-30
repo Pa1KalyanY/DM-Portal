@@ -113,13 +113,61 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
     const urlState = readNavigationStateFromUrl();
     return (urlState.masterContact as any) || 'all';
   });
+  const [selectedTechnology, setSelectedTechnology] = useState<string>(() => {
+    const urlState = readNavigationStateFromUrl();
+    return urlState.masterTechnology || 'All';
+  });
+  const [repeatFilter, setRepeatFilter] = useState<'all' | 'repeat_only' | 'first_time_only'>(() => {
+    const urlState = readNavigationStateFromUrl();
+    return (urlState.masterRepeatFilter as any) || 'all';
+  });
+  const [h1bStatus, setH1bStatus] = useState<string>(() => {
+    const urlState = readNavigationStateFromUrl();
+    return urlState.masterH1b || 'All';
+  });
+  const [greenCard, setGreenCard] = useState<string>(() => {
+    const urlState = readNavigationStateFromUrl();
+    return urlState.masterGreenCard || 'All';
+  });
+  const [availableTechnologies, setAvailableTechnologies] = useState<string[]>([]);
+  const [isAdvancedFiltersOpen, setIsAdvancedFiltersOpen] = useState(false);
+  const [exportingCsv, setExportingCsv] = useState(false);
   const [hasResumeOnly, setHasResumeOnly] = useState(false);
   const [hasLinkedInOnly, setHasLinkedInOnly] = useState(false);
+
+  // Dynamic Technology List Loader
+  useEffect(() => {
+    let isMounted = true;
+    api.getMasterCandidateTechnologies(selectedCompany)
+      .then(res => {
+        if (isMounted && res.success && Array.isArray(res.technologies)) {
+          setAvailableTechnologies(res.technologies);
+        }
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
+  }, [selectedCompany]);
 
   // Date Assigned Filter
   const [datePreset, setDatePreset] = useState<string>('All');
   const [customDateFrom, setCustomDateFrom] = useState<string>('');
   const [customDateTo, setCustomDateTo] = useState<string>('');
+
+  // Active filters count
+  const activeFilterCount = [
+    selectedStatus !== 'All',
+    selectedOwner !== 'All',
+    selectedGender !== 'All',
+    contactFilter !== 'all',
+    selectedTechnology !== 'All',
+    repeatFilter !== 'all',
+    h1bStatus !== 'All',
+    greenCard !== 'All',
+    hasResumeOnly,
+    hasLinkedInOnly,
+    datePreset !== 'All',
+    customDateFrom || customDateTo,
+  ].filter(Boolean).length;
 
   // Quick Assign Modal State
   const [assignModalOpen, setAssignModalOpen] = useState(false);
@@ -172,12 +220,16 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
       masterOwner: selectedOwner,
       masterGender: selectedGender,
       masterContact: contactFilter,
+      masterTechnology: selectedTechnology !== 'All' ? selectedTechnology : undefined,
+      masterRepeatFilter: repeatFilter !== 'all' ? repeatFilter : undefined,
+      masterH1b: h1bStatus !== 'All' ? h1bStatus : undefined,
+      masterGreenCard: greenCard !== 'All' ? greenCard : undefined,
       masterTab: activeTab,
       masterPage: currentPage,
       masterSortBy: sortBy !== 'created_at' ? sortBy : undefined,
       masterSortOrder: sortOrder !== 'desc' ? sortOrder : undefined,
     }, 'replace');
-  }, [search, selectedCompany, selectedStatus, selectedOwner, selectedGender, contactFilter, activeTab, currentPage, sortBy, sortOrder]);
+  }, [search, selectedCompany, selectedStatus, selectedOwner, selectedGender, contactFilter, selectedTechnology, repeatFilter, h1bStatus, greenCard, activeTab, currentPage, sortBy, sortOrder]);
 
   // Batch Candidate Selection & Gender Assignment
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -399,6 +451,10 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
         owner: selectedOwner,
         gender: selectedGender,
         contactFilter: contactFilter !== 'all' ? contactFilter : undefined,
+        technology: selectedTechnology !== 'All' ? selectedTechnology : undefined,
+        repeatFilter: repeatFilter !== 'all' ? repeatFilter : undefined,
+        h1bStatus: h1bStatus !== 'All' ? h1bStatus : undefined,
+        greenCard: greenCard !== 'All' ? greenCard : undefined,
         hasResume: hasResumeOnly,
         hasLinkedIn: hasLinkedInOnly,
         dateFrom: customDateFrom || undefined,
@@ -423,6 +479,10 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
     setSelectedOwner('All');
     setSelectedGender('All');
     setContactFilter('all');
+    setSelectedTechnology('All');
+    setRepeatFilter('all');
+    setH1bStatus('All');
+    setGreenCard('All');
     setHasResumeOnly(false);
     setHasLinkedInOnly(false);
     setDatePreset('All');
@@ -433,6 +493,32 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
     setSelectedIds(new Set());
     setSelectAllMatching(false);
     setCurrentPage(1);
+  };
+
+  const handleExportFilteredCandidatesCsv = () => {
+    setExportingCsv(true);
+    try {
+      api.exportMasterCandidatesCsv({
+        search,
+        company: selectedCompany,
+        status: selectedStatus,
+        owner: selectedOwner,
+        gender: selectedGender,
+        contactFilter: contactFilter !== 'all' ? contactFilter : undefined,
+        technology: selectedTechnology !== 'All' ? selectedTechnology : undefined,
+        repeatFilter: repeatFilter !== 'all' ? repeatFilter : undefined,
+        h1bStatus: h1bStatus !== 'All' ? h1bStatus : undefined,
+        greenCard: greenCard !== 'All' ? greenCard : undefined,
+        hasResume: hasResumeOnly,
+        hasLinkedIn: hasLinkedInOnly,
+        dateFrom: customDateFrom || undefined,
+        dateTo: customDateTo || undefined,
+        sortBy,
+        sortOrder,
+      });
+    } finally {
+      setTimeout(() => setExportingCsv(false), 1500);
+    }
   };
 
   const [dataHealthWarning, setDataHealthWarning] = useState<string | null>(null);
@@ -704,11 +790,21 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
                 <span>Upload Applications</span>
               </button>
               <button
+                onClick={handleExportFilteredCandidatesCsv}
+                disabled={exportingCsv}
+                className="btn-secondary !text-xs !py-1.5 shadow-2xs cursor-pointer flex items-center gap-1.5 font-semibold text-blue-700 bg-blue-50/50 border-blue-200 hover:bg-blue-100"
+                title="Export all matching candidates across all pages based on active filters"
+              >
+                <Download className={`w-3.5 h-3.5 text-blue-600 ${exportingCsv ? 'animate-bounce' : ''}`} />
+                <span>{exportingCsv ? 'Exporting...' : 'Export Filtered (CSV)'}</span>
+              </button>
+              <button
                 onClick={exportCurrentTableToCsv}
                 className="btn-secondary !text-xs !py-1.5 shadow-2xs cursor-pointer"
+                title="Export current page only"
               >
                 <Download className="w-3.5 h-3.5 text-[#3659D9]" />
-                <span>Export CSV</span>
+                <span>Page CSV</span>
               </button>
               <button
                 onClick={handleClearDatabaseClick}
@@ -867,6 +963,138 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
                 Clear Date Filter
               </button>
             )}
+          </div>
+        )}
+
+        {/* Advanced Filters Toggle & Reset Actions */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100 text-xs">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsAdvancedFiltersOpen(!isAdvancedFiltersOpen)}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+                isAdvancedFiltersOpen || activeFilterCount > 0
+                  ? 'bg-blue-50 text-blue-800 border-blue-300 shadow-2xs'
+                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              <Filter className="w-3.5 h-3.5 text-blue-600" />
+              <span>Advanced Search Filters</span>
+              {activeFilterCount > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-600 text-white">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+
+            {activeFilterCount > 0 && (
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="flex items-center gap-1 text-slate-500 hover:text-rose-600 font-medium transition-colors cursor-pointer text-xs"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset All ({activeFilterCount})</span>
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3 text-slate-500 text-[11px]">
+            <span>Showing <strong>{candidates.length}</strong> of <strong>{totalCount}</strong> candidates</span>
+            {selectedCompany !== 'All' && <span>• <strong>{selectedCompany}</strong></span>}
+          </div>
+        </div>
+
+        {/* Collapsible Advanced Filters Drawer */}
+        {isAdvancedFiltersOpen && (
+          <div className="p-4 bg-slate-50/80 border border-slate-200 rounded-xl space-y-3 animate-fade-in text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+              {/* Technology / Role Filter */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Technology / Role</label>
+                <select
+                  value={selectedTechnology}
+                  onChange={(e) => {
+                    setSelectedTechnology(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="All">All Technologies ({availableTechnologies.length})</option>
+                  {availableTechnologies.map(tech => (
+                    <option key={tech} value={tech}>{tech}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Repeat Applicant Frequency Filter */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Application Frequency</label>
+                <select
+                  value={repeatFilter}
+                  onChange={(e) => {
+                    setRepeatFilter(e.target.value as any);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="all">All Frequency Levels</option>
+                  <option value="repeat_only">Repeat Applicants Only (2+ Apps)</option>
+                  <option value="first_time_only">First-Time Applicants (1 App)</option>
+                </select>
+              </div>
+
+              {/* H1B Sponsorship */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">H1B Sponsorship</label>
+                <select
+                  value={h1bStatus}
+                  onChange={(e) => {
+                    setH1bStatus(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="All">H1B: All</option>
+                  <option value="No">No (Does Not Require H1B)</option>
+                  <option value="Yes">Yes (Requires H1B)</option>
+                </select>
+              </div>
+
+              {/* Green Card / US-C Work Auth */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Work Auth / Green Card</label>
+                <select
+                  value={greenCard}
+                  onChange={(e) => {
+                    setGreenCard(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="All">Work Auth: All</option>
+                  <option value="Yes">Yes (US Citizen / Green Card)</option>
+                  <option value="No">No / Other Authorization</option>
+                </select>
+              </div>
+
+              {/* Contact Data Quality */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 mb-1">Contact Integrity</label>
+                <select
+                  value={contactFilter}
+                  onChange={(e) => {
+                    setContactFilter(e.target.value as any);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="all">All Contact Profiles</option>
+                  <option value="missing_phone">Missing Phone Number</option>
+                  <option value="missing_email">Missing Email Address</option>
+                </select>
+              </div>
+            </div>
           </div>
         )}
 

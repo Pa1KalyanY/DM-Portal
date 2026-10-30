@@ -1431,6 +1431,16 @@ app.get('/api/reports/analytics', (req: Request, res: Response): void => {
   }
 });
 
+app.get('/api/reports/cross-technology', (req: Request, res: Response): void => {
+  try {
+    const company = (req.query.company as any) || (req.headers['x-company'] as any) || 'AaraTech';
+    const data = dbService.getCrossTechnologyAnalytics(company);
+    res.json({ success: true, ...data });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // -------------------------------------------------------------
 // 10E. PRE-UPLOAD DUPLICATE CHECK AGAINST MASTER CANDIDATE DB
 // -------------------------------------------------------------
@@ -1462,6 +1472,12 @@ app.get('/api/master-candidates', (req: Request, res: Response): void => {
     const owner = req.query.owner as string;
     const gender = req.query.gender as string;
     const contactFilter = req.query.contactFilter as string;
+    const technology = req.query.technology as string;
+    const repeatFilter = req.query.repeatFilter as string;
+    const h1bStatus = req.query.h1bStatus as string;
+    const greenCard = req.query.greenCard as string;
+    const hasResume = req.query.hasResume === 'true' ? true : undefined;
+    const hasLinkedIn = req.query.hasLinkedIn === 'true' ? true : undefined;
     const dateFrom = req.query.dateFrom as string;
     const dateTo = req.query.dateTo as string;
     const sortBy = req.query.sortBy as string;
@@ -1476,6 +1492,12 @@ app.get('/api/master-candidates', (req: Request, res: Response): void => {
       owner,
       gender,
       contactFilter,
+      technology,
+      repeatFilter,
+      h1bStatus,
+      greenCard,
+      hasResume,
+      hasLinkedIn,
       dateFrom,
       dateTo,
       sortBy,
@@ -1489,6 +1511,123 @@ app.get('/api/master-candidates', (req: Request, res: Response): void => {
       page,
       pageSize,
     });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/master-candidates/technologies', (req: Request, res: Response): void => {
+  try {
+    const company = (req.query.company as string) || (req.headers['x-company'] as string) || undefined;
+    const technologies = dbService.getMasterCandidateTechnologies(company);
+    res.json({ success: true, technologies });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/master-candidates/export-csv', (req: Request, res: Response): void => {
+  try {
+    const company = (req.query.company as string) || (req.headers['x-company'] as string) || undefined;
+    const search = req.query.search as string;
+    const status = req.query.status as string;
+    const owner = req.query.owner as string;
+    const gender = req.query.gender as string;
+    const contactFilter = req.query.contactFilter as string;
+    const technology = req.query.technology as string;
+    const repeatFilter = req.query.repeatFilter as string;
+    const h1bStatus = req.query.h1bStatus as string;
+    const greenCard = req.query.greenCard as string;
+    const hasResume = req.query.hasResume === 'true' ? true : undefined;
+    const hasLinkedIn = req.query.hasLinkedIn === 'true' ? true : undefined;
+    const dateFrom = req.query.dateFrom as string;
+    const dateTo = req.query.dateTo as string;
+    const sortBy = req.query.sortBy as string;
+    const sortOrder = req.query.sortOrder as ('asc' | 'desc');
+
+    const result = dbService.getMasterCandidates({
+      company,
+      page: 1,
+      pageSize: 10000,
+      search,
+      status,
+      owner,
+      gender,
+      contactFilter,
+      technology,
+      repeatFilter,
+      h1bStatus,
+      greenCard,
+      hasResume,
+      hasLinkedIn,
+      dateFrom,
+      dateTo,
+      sortBy,
+      sortOrder,
+    });
+
+    const escapeCsv = (val: any) => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val);
+      return `"${str.replace(/"/g, '""')}"`;
+    };
+
+    const headers = [
+      'Person ID',
+      'Full Name',
+      'Gender',
+      'Primary Email',
+      'Primary Phone',
+      'Location',
+      'Technology / Current Title',
+      'Company',
+      'Status',
+      'Assigned Owner',
+      'H1B Sponsorship',
+      'Green Card / US-C',
+      'Total Applications',
+      'Repeat Applications',
+      'First Applied Date',
+      'Last Applied Date',
+      'Resume URL',
+      'LinkedIn URL',
+      'Latest Recruiter Feedback',
+    ];
+
+    const rows: string[] = [headers.join(',')];
+
+    for (const c of result.candidates) {
+      const latestFeedback = c.recruiter_contacts && c.recruiter_contacts.length > 0
+        ? (c.recruiter_contacts[0].outcome || c.recruiter_contacts[0].feedback_1 || c.recruiter_contacts[0].notes || '')
+        : '';
+
+      rows.push([
+        escapeCsv(c.person_id || c.id),
+        escapeCsv(c.full_name),
+        escapeCsv(c.gender || 'Unspecified'),
+        escapeCsv(c.primary_email),
+        escapeCsv(c.primary_phone),
+        escapeCsv(c.location),
+        escapeCsv(c.current_title),
+        escapeCsv(c.company),
+        escapeCsv(c.current_status),
+        escapeCsv(c.current_owner),
+        escapeCsv(c.h1b_status || 'No'),
+        escapeCsv(c.green_card || 'No'),
+        c.total_applications ?? 1,
+        c.repeat_applications ?? 0,
+        escapeCsv(c.first_applied_date),
+        escapeCsv(c.last_applied_date),
+        escapeCsv(c.resume_url),
+        escapeCsv(c.linkedin_url),
+        escapeCsv(latestFeedback),
+      ].join(','));
+    }
+
+    const filename = `Master_Candidates_${company || 'All'}_${new Date().toISOString().split('T')[0]}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send('\uFEFF' + rows.join('\r\n'));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

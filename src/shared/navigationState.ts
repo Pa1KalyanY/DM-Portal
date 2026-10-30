@@ -47,6 +47,10 @@ export interface NavigationState {
   masterOwner?: string;
   masterGender?: string;
   masterContact?: string;
+  masterTechnology?: string;
+  masterRepeatFilter?: string;
+  masterH1b?: string;
+  masterGreenCard?: string;
   masterTab?: 'completed' | 'incomplete' | 'upload';
   masterPage?: number;
   masterSortBy?: string;
@@ -163,6 +167,10 @@ export function readNavigationStateFromUrl(): Partial<NavigationState> {
     if (params.has('mOwner')) parsed.masterOwner = params.get('mOwner') || 'All';
     if (params.has('mGender')) parsed.masterGender = params.get('mGender') || 'All';
     if (params.has('mContact')) parsed.masterContact = params.get('mContact') || 'all';
+    if (params.has('mTech')) parsed.masterTechnology = params.get('mTech') || undefined;
+    if (params.has('mRepeat')) parsed.masterRepeatFilter = params.get('mRepeat') || undefined;
+    if (params.has('mH1b')) parsed.masterH1b = params.get('mH1b') || undefined;
+    if (params.has('mGc')) parsed.masterGreenCard = params.get('mGc') || undefined;
     const rawMTab = params.get('mTab');
     if (rawMTab === 'completed' || rawMTab === 'incomplete' || rawMTab === 'upload') parsed.masterTab = rawMTab;
     if (params.has('mPage')) {
@@ -336,6 +344,18 @@ export function syncNavigationToUrlAndStorage(
 
       if (state.masterContact && state.masterContact !== 'all') currentParams.set('mContact', state.masterContact);
       else currentParams.delete('mContact');
+
+      if (state.masterTechnology && state.masterTechnology !== 'All') currentParams.set('mTech', state.masterTechnology);
+      else currentParams.delete('mTech');
+
+      if (state.masterRepeatFilter && state.masterRepeatFilter !== 'all') currentParams.set('mRepeat', state.masterRepeatFilter);
+      else currentParams.delete('mRepeat');
+
+      if (state.masterH1b && state.masterH1b !== 'All') currentParams.set('mH1b', state.masterH1b);
+      else currentParams.delete('mH1b');
+
+      if (state.masterGreenCard && state.masterGreenCard !== 'All') currentParams.set('mGc', state.masterGreenCard);
+      else currentParams.delete('mGc');
 
       if (state.masterTab && state.masterTab !== 'completed') currentParams.set('mTab', state.masterTab);
       else currentParams.delete('mTab');
