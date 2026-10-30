@@ -157,6 +157,12 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
     };
   }>({ open: false });
 
+  // Phase 2 / Step 5: Transfer Modal Copy States
+  const [isCopyingFromModal, setIsCopyingFromModal] = useState<boolean>(false);
+  const [modalCopyToast, setModalCopyToast] = useState<string | null>(null);
+  const [modalIncludeHeaders, setModalIncludeHeaders] = useState<boolean>(false);
+  const [modalCopyFormat, setModalCopyFormat] = useState<'default' | 'verification'>('default');
+
   // File Upload State
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState<boolean>(false);
@@ -659,8 +665,15 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
     setImportMethod('upload');
   };
 
-  // 1-Click Copy Passed Applications as Google Sheets TSV
-  const handleCopyPassedApplications = async (includeHeaders = false) => {
+  // 1-Click Copy Passed Applications as Google Sheets TSV (Guaranteed Unique / Deduplicated)
+  const handleCopyPassedApplications = async (
+    includeHeaders = false,
+    options: {
+      onlyNewCandidates?: boolean;
+      gender?: string;
+      uniqueOnly?: boolean;
+    } = {}
+  ) => {
     try {
       const idsToCopy = selectedApplicantIds.length > 0 ? selectedApplicantIds : undefined;
       const res = await api.copyGoogleSheetsTsv({
@@ -671,12 +684,14 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
         startDate: viewMode === 'permanent_history' && historyStartDate ? historyStartDate : undefined,
         endDate: viewMode === 'permanent_history' && historyEndDate ? historyEndDate : undefined,
         jobId: selectedJobSlot !== 'ALL' ? selectedJobSlot : undefined,
-        gender: genderFilter !== 'ALL' ? genderFilter : undefined,
+        gender: options.gender || (genderFilter !== 'ALL' ? genderFilter : undefined),
         role: roleFilter !== 'ALL' ? roleFilter : undefined,
         nameMatchCategory: nameMatchFilter !== 'ALL' ? nameMatchFilter : undefined,
         search: searchQuery ? searchQuery : undefined,
         ids: idsToCopy,
         includeHeaders,
+        uniqueOnly: options.uniqueOnly !== false, // Default to true: "Do not copy duplicates to Google Sheets"
+        onlyNewCandidates: options.onlyNewCandidates === true,
       });
 
       const dateDesc = resultsDate !== 'ALL'
@@ -685,14 +700,75 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
             ? `for range ${historyStartDate || '...'} to ${historyEndDate || '...'}`
             : 'for all dates');
 
-      const filterDesc = genderFilter !== 'ALL' ? ` [${genderFilter}]` : '';
+      const filterDesc = (options.gender || genderFilter !== 'ALL') ? ` [${options.gender || genderFilter}]` : '';
+      const typeDesc = options.onlyNewCandidates ? ' NEW Unique' : ' Unique';
 
       setCopySuccessMessage(
-        `Copied ${res.total} application(s) (${dateDesc}${filterDesc}) formatted for Google Sheets! (8 Columns: Date, Name, Contact, Email, Role, GC/US-C, H1B, LinkedIn). Ready to paste with Ctrl+V.`
+        `Copied ${res.total}${typeDesc} application(s) (${dateDesc}${filterDesc}) formatted for Google Sheets without duplicates! (8 Columns: Date, Name, Contact, Email, Role, GC/US-C, H1B, LinkedIn). Ready to paste with Ctrl+V.`
       );
       setTimeout(() => setCopySuccessMessage(null), 5000);
     } catch (err: any) {
       alert(`Copy failed: ${err.message}`);
+    }
+  };
+
+  // Phase 2 / Step 5: Direct 1-Click Copy Unique Applications from Transfer Completed Modal
+  const handleCopyFromTransferModal = async (
+    scope: 'NEW_UNIQUE_ONLY' | 'ALL_TRANSFERRED_UNIQUE' | 'REPEAT_ONLY',
+    gender?: 'MALE' | 'FEMALE' | 'UNSPECIFIED'
+  ) => {
+    if (!transferModalSummary.result) return;
+    setIsCopyingFromModal(true);
+    try {
+      const allTransfers = transferModalSummary.result.transfers || [];
+      let filteredTransfers = allTransfers;
+
+      if (scope === 'NEW_UNIQUE_ONLY') {
+        filteredTransfers = allTransfers.filter(
+          (t) => t.status === 'SUCCESS' && (t.classification || '').includes('NEW CANDIDATE')
+        );
+      } else if (scope === 'ALL_TRANSFERRED_UNIQUE') {
+        filteredTransfers = allTransfers.filter((t) => t.status === 'SUCCESS');
+      } else if (scope === 'REPEAT_ONLY') {
+        filteredTransfers = allTransfers.filter(
+          (t) => t.status === 'SUCCESS' && (t.classification || '').includes('EXISTING CANDIDATE')
+        );
+      }
+
+      const targetIds = filteredTransfers.map((t) => t.applicantId).filter(Boolean);
+
+      if (targetIds.length === 0) {
+        setModalCopyToast('No applications found matching the selected copy criteria.');
+        setTimeout(() => setModalCopyToast(null), 4000);
+        return;
+      }
+
+      const res = await api.copyGoogleSheetsTsv({
+        ids: targetIds,
+        company: activeCompany,
+        gender: gender || undefined,
+        uniqueOnly: true,
+        onlyNewCandidates: scope === 'NEW_UNIQUE_ONLY',
+        includeHeaders: modalIncludeHeaders,
+        format: modalCopyFormat,
+      });
+
+      const scopeName =
+        scope === 'NEW_UNIQUE_ONLY'
+          ? 'NEW Unique Applications (No duplicates)'
+          : scope === 'REPEAT_ONLY'
+          ? 'Repeat Applications'
+          : 'All Transferred Unique Applications';
+
+      const toast = `✓ Copied ${res.total} ${scopeName} to clipboard! Paste directly into Google Sheets (Ctrl+V).`;
+      setModalCopyToast(toast);
+      setCopySuccessMessage(toast);
+      setTimeout(() => setModalCopyToast(null), 6000);
+      setTimeout(() => setCopySuccessMessage(null), 6000);
+    } catch (err: any) {
+      alert(`Copy failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsCopyingFromModal(false);
     }
   };
 
@@ -2172,6 +2248,28 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
               </span>
             </button>
 
+            {/* Step 5 / User Request: Copy Only New Candidates (Unique, No Duplicates) */}
+            <button
+              type="button"
+              onClick={() => handleCopyPassedApplications(false, { onlyNewCandidates: true, uniqueOnly: true })}
+              className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold !text-xs !py-1.5 px-3 rounded-lg shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Copy only brand new candidate applications (excluding repeat applicants and all duplicates) formatted for Google Sheets (Ctrl+V)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300" />
+              <span>Copy Only New Unique</span>
+            </button>
+
+            {/* Step 5: Copy All Unique Passed (Strictly deduplicated) */}
+            <button
+              type="button"
+              onClick={() => handleCopyPassedApplications(false, { uniqueOnly: true })}
+              className="btn-secondary !text-xs !py-1.5 shadow-2xs flex items-center gap-1.5 font-semibold"
+              title="Copy all passed applications with guaranteed zero duplicates for Google Sheets (Ctrl+V)"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              <span>Copy All Unique Passed</span>
+            </button>
+
             {/* Primary Action: Copy for Google Sheets (Verification & Match TSV - Section 6.3 8-Column Format) */}
             <button
               type="button"
@@ -2183,19 +2281,29 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
               <span>
                 {selectedApplicantIds.length > 0
                   ? `Copy Selected (${selectedApplicantIds.length}) to Sheets`
-                  : 'Copy for Google Sheets (Verification TSV)'}
+                  : 'Verification TSV'}
               </span>
             </button>
 
-            {/* Secondary Action: Copy Tracker Format */}
-            <button
-              type="button"
-              onClick={() => handleCopyPassedApplications(false)}
-              className="btn-secondary !text-xs !py-1.5 shadow-2xs"
-              title="Copy standard recruiter tracker format (Date, Name, Contact, Email, Role, GC, H1B, LinkedIn)"
-            >
-              <span>Copy Tracker TSV</span>
-            </button>
+            {/* Step 5: Quick Gender Unique Outputs */}
+            <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200">
+              <button
+                type="button"
+                onClick={() => handleCopyPassedApplications(false, { gender: 'MALE', uniqueOnly: true })}
+                className="text-[10px] font-semibold text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition-colors cursor-pointer"
+                title="Copy Male Unique Passed applications without duplicates"
+              >
+                ♂ Male Unique
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCopyPassedApplications(false, { gender: 'FEMALE', uniqueOnly: true })}
+                className="text-[10px] font-semibold text-rose-700 hover:bg-rose-50 px-2 py-1 rounded transition-colors cursor-pointer"
+                title="Copy Female Unique Passed applications without duplicates"
+              >
+                ♀ Female Unique
+              </button>
+            </div>
 
             {/* Optional: With Headers Toggle */}
             <button
@@ -2703,7 +2811,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
       {/* Phase 2: Transfer Passed Applications Result Modal */}
       {transferModalSummary.open && transferModalSummary.result && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6 space-y-4 animate-in fade-in zoom-in-95 max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full p-6 space-y-4 animate-in fade-in zoom-in-95 max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2 text-slate-900 font-bold text-base">
                 <Database className="w-5 h-5 text-emerald-600" />
@@ -2767,8 +2875,160 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
               </div>
             )}
 
+            {/* 1-Click Copy Unique Applications to Google Sheets Action Card */}
+            <div className="bg-gradient-to-r from-emerald-50 via-teal-50/70 to-blue-50 border-2 border-emerald-300/80 rounded-xl p-3.5 space-y-3 shadow-xs">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-emerald-600 text-white rounded-lg shadow-2xs">
+                    <Copy className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                      <span>Copy Unique Applications to Google Sheets</span>
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 font-semibold px-2 py-0.5 rounded-full">
+                        8 Columns TSV • Guaranteed Zero Duplicates
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-600">
+                      Standard Tracker (Date, Name, Contact, Email, Job Role, GC/US-C, H1B, LinkedIn) ready for instant paste (Ctrl+V).
+                    </p>
+                  </div>
+                </div>
+
+                {/* Controls: Headers & Format */}
+                <div className="flex items-center gap-2">
+                  <label className="text-[11px] text-slate-700 font-medium flex items-center gap-1.5 cursor-pointer bg-white px-2 py-1 rounded-md border border-slate-200 shadow-2xs">
+                    <input
+                      type="checkbox"
+                      checked={modalIncludeHeaders}
+                      onChange={(e) => setModalIncludeHeaders(e.target.checked)}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-0 cursor-pointer"
+                    />
+                    <span>Header Row</span>
+                  </label>
+
+                  <div className="flex items-center rounded-lg border border-slate-200 bg-white p-0.5 text-[11px] font-medium shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setModalCopyFormat('default')}
+                      className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                        modalCopyFormat === 'default'
+                          ? 'bg-slate-800 text-white font-semibold shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Tracker Format (Date, Name, Contact Number, Email I'd, Job Role, GREEN CARD/US-C, H1B-Y/N, LinkedIn Profile Link)"
+                    >
+                      Tracker TSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModalCopyFormat('verification')}
+                      className={`px-2 py-1 rounded-md transition-colors cursor-pointer ${
+                        modalCopyFormat === 'verification'
+                          ? 'bg-slate-800 text-white font-semibold shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Verification TSV (Candidate Name, Role, Email, Phone, Gender, Status, Match Score, Matched Reference)"
+                    >
+                      Verification TSV
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                {/* 1. Primary Highlight Button: Copy Only New Unique Applications */}
+                <button
+                  type="button"
+                  onClick={() => handleCopyFromTransferModal('NEW_UNIQUE_ONLY')}
+                  disabled={isCopyingFromModal || transferModalSummary.result.newCandidatesCount === 0}
+                  className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs py-2 px-3.5 rounded-lg shadow-sm flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  title="Copy only brand new candidate profiles without any duplicates or previous history"
+                >
+                  {isCopyingFromModal ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300" />
+                  )}
+                  <span>
+                    📋 Copy Only New Unique Applications ({transferModalSummary.result.newCandidatesCount})
+                  </span>
+                </button>
+
+                {/* 2. Secondary Button: Copy All Unique Transferred */}
+                <button
+                  type="button"
+                  onClick={() => handleCopyFromTransferModal('ALL_TRANSFERRED_UNIQUE')}
+                  disabled={isCopyingFromModal || transferModalSummary.result.transferredCount === 0}
+                  className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-xs py-2 px-3 rounded-lg shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                  title="Copy all successfully transferred unique applications, strictly excluding the skipped duplicates"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>
+                    Copy All Unique Transferred ({transferModalSummary.result.transferredCount})
+                  </span>
+                </button>
+
+                {/* 3. Tertiary: Copy Repeat Applications */}
+                {Math.max(0, transferModalSummary.result.newApplicationsCount - transferModalSummary.result.newCandidatesCount) > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleCopyFromTransferModal('REPEAT_ONLY')}
+                    disabled={isCopyingFromModal}
+                    className="bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white font-semibold text-xs py-2 px-2.5 rounded-lg shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                    title="Copy repeat applications for existing candidates"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>
+                      Repeat Apps ({Math.max(0, transferModalSummary.result.newApplicationsCount - transferModalSummary.result.newCandidatesCount)})
+                    </span>
+                  </button>
+                )}
+
+                {/* Gender Specific Unique Copies */}
+                <div className="flex items-center gap-1 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyFromTransferModal('ALL_TRANSFERRED_UNIQUE', 'MALE')}
+                    disabled={isCopyingFromModal}
+                    className="bg-white hover:bg-slate-100 text-blue-800 border border-blue-200 font-semibold text-[11px] py-1.5 px-2 rounded-md shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                    title="Copy unique male passed candidates"
+                  >
+                    ♂ Male Unique
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyFromTransferModal('ALL_TRANSFERRED_UNIQUE', 'FEMALE')}
+                    disabled={isCopyingFromModal}
+                    className="bg-white hover:bg-slate-100 text-rose-800 border border-rose-200 font-semibold text-[11px] py-1.5 px-2 rounded-md shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                    title="Copy unique female passed candidates"
+                  >
+                    ♀ Female Unique
+                  </button>
+                </div>
+              </div>
+
+              {/* Feedback toast inside modal */}
+              {modalCopyToast && (
+                <div className="p-2.5 bg-emerald-100 border border-emerald-300 rounded-lg text-emerald-900 text-xs font-semibold flex items-center justify-between animate-in fade-in">
+                  <span className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                    <span>{modalCopyToast}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setModalCopyToast(null)}
+                    className="text-emerald-700 hover:text-emerald-900 p-0.5 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* Candidate Breakdown List */}
-            <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg min-h-[140px] max-h-[260px]">
+            <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg min-h-[140px] max-h-[240px]">
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-50 text-slate-500 font-semibold sticky top-0 border-b border-slate-200">
                   <tr>

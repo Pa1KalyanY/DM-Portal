@@ -727,6 +727,8 @@ export const api = {
     ids?: string[];
     includeHeaders?: boolean;
     format?: 'verification' | 'default';
+    uniqueOnly?: boolean;
+    onlyNewCandidates?: boolean;
   }) => {
     let res: Response;
     if (options?.ids && options.ids.length > 0) {
@@ -749,6 +751,8 @@ export const api = {
           nameMatchCategory: options.nameMatchCategory,
           includeHeaders: options.includeHeaders,
           format: options.format || 'default',
+          uniqueOnly: options.uniqueOnly,
+          onlyNewCandidates: options.onlyNewCandidates,
         }),
       });
     } else {
@@ -767,6 +771,8 @@ export const api = {
       if (options?.nameMatchCategory && options.nameMatchCategory !== 'ALL') query.set('nameMatchCategory', options.nameMatchCategory);
       if (options?.includeHeaders !== undefined) query.set('includeHeaders', String(options.includeHeaders));
       if (options?.format) query.set('format', options.format);
+      if (options?.uniqueOnly) query.set('uniqueOnly', 'true');
+      if (options?.onlyNewCandidates) query.set('onlyNewCandidates', 'true');
       res = await fetch(`/api/export-sheets-data?${query.toString()}`);
     }
 
@@ -800,6 +806,8 @@ export const api = {
     ids?: string[];
     includeHeaders?: boolean;
     format?: 'verification' | 'default';
+    uniqueOnly?: boolean;
+    onlyNewCandidates?: boolean;
   }): Promise<{ success: boolean; total: number; message: string }> => {
     const data = await api.getGoogleSheetsData(options);
     let textToCopy = options?.includeHeaders === true ? data.tsvWithHeaders : data.tsvNoHeaders;

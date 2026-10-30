@@ -2059,6 +2059,8 @@ app.get('/api/export-sheets-data', (req: Request, res: Response): void => {
     const includeHeaders = req.query.includeHeaders === 'true'; // Default is false (NO header row when copying)
     const format = (req.query.format as string) || 'default';
     const idsQuery = req.query.ids as string;
+    const uniqueOnly = req.query.uniqueOnly === 'true';
+    const onlyNewCandidates = req.query.onlyNewCandidates === 'true';
 
     const search = req.query.search as string;
     const role = (req.query.role as string) || (req.query.normalizedRole as string);
@@ -2071,9 +2073,59 @@ app.get('/api/export-sheets-data', (req: Request, res: Response): void => {
       if (company && company !== 'All' && company !== 'Both') {
         applicants = applicants.filter(a => (a as any).company === company);
       }
+      if (gender && gender !== 'ALL') {
+        applicants = applicants.filter(a => a.gender === gender);
+      }
+      if (status && status !== 'ALL') {
+        applicants = applicants.filter(a => a.effectiveResult === status);
+      }
     } else {
-      applicants = dbService.getAllApplicantsForExport({ status, gender, jobId, importId, company, applicationDate, startDate, endDate, search, role, nameMatchCategory });
+      applicants = dbService.getAllApplicantsForExport({
+        status,
+        gender,
+        jobId,
+        importId,
+        company,
+        applicationDate,
+        startDate,
+        endDate,
+        search,
+        role,
+        nameMatchCategory,
+        uniqueOnly,
+        onlyNewCandidates,
+      });
     }
+
+    // In-memory identity deduplication to guarantee zero duplicates exported to Google Sheets
+    if (uniqueOnly || onlyNewCandidates) {
+      const seenEmails = new Set<string>();
+      const seenPhones = new Set<string>();
+      const seenNames = new Set<string>();
+      applicants = applicants.filter(a => {
+        if (a.isDuplicate || (a as any).is_duplicate === 1) return false;
+        const normEmail = (a.email || '').trim().toLowerCase();
+        const normPhone = (a.phone || '').replace(/\D/g, '');
+        const normName = (a.fullName || '').trim().toLowerCase();
+
+        if (normEmail && normEmail.includes('@') && !['unknown', 'n/a', 'none', 'no email'].includes(normEmail)) {
+          if (seenEmails.has(normEmail)) return false;
+          seenEmails.add(normEmail);
+        }
+        if (normPhone && normPhone.length >= 7) {
+          const pKey = normPhone.slice(-10);
+          if (seenPhones.has(pKey)) return false;
+          seenPhones.add(pKey);
+        }
+        if (!normEmail && !normPhone && normName) {
+          const nKey = `${normName}:${a.jobTitle || ''}`;
+          if (seenNames.has(nKey)) return false;
+          seenNames.add(nKey);
+        }
+        return true;
+      });
+    }
+
     const rows = applicants.map(a => formatGoogleSheetsRow(a));
     const tsvWithHeaders = generateGoogleSheetsTsv(rows, true);
     const tsvNoHeaders = generateGoogleSheetsTsv(rows, false);
@@ -2103,7 +2155,23 @@ app.get('/api/export-sheets-data', (req: Request, res: Response): void => {
 // POST endpoint for bulk copying/exporting selected applicants by ID array
 app.post('/api/export-sheets-data', (req: Request, res: Response): void => {
   try {
-    const { status, gender, jobId, importId, ids, includeHeaders, format, applicationDate, startDate, endDate, search, role, nameMatchCategory } = req.body;
+    const {
+      status,
+      gender,
+      jobId,
+      importId,
+      ids,
+      includeHeaders,
+      format,
+      applicationDate,
+      startDate,
+      endDate,
+      search,
+      role,
+      nameMatchCategory,
+      uniqueOnly,
+      onlyNewCandidates,
+    } = req.body;
     const company = (req.body.company as string) || (req.query.company as string) || (req.headers['x-company'] as string) || undefined;
 
     let applicants: Applicant[];
@@ -2112,9 +2180,59 @@ app.post('/api/export-sheets-data', (req: Request, res: Response): void => {
       if (company && company !== 'All' && company !== 'Both') {
         applicants = applicants.filter(a => (a as any).company === company);
       }
+      if (gender && gender !== 'ALL') {
+        applicants = applicants.filter(a => a.gender === gender);
+      }
+      if (status && status !== 'ALL') {
+        applicants = applicants.filter(a => a.effectiveResult === status);
+      }
     } else {
-      applicants = dbService.getAllApplicantsForExport({ status, gender, jobId, importId, company, applicationDate, startDate, endDate, search, role, nameMatchCategory });
+      applicants = dbService.getAllApplicantsForExport({
+        status,
+        gender,
+        jobId,
+        importId,
+        company,
+        applicationDate,
+        startDate,
+        endDate,
+        search,
+        role,
+        nameMatchCategory,
+        uniqueOnly: uniqueOnly === true || uniqueOnly === 'true',
+        onlyNewCandidates: onlyNewCandidates === true || onlyNewCandidates === 'true',
+      });
     }
+
+    // In-memory identity deduplication to guarantee zero duplicates exported to Google Sheets
+    if (uniqueOnly === true || uniqueOnly === 'true' || onlyNewCandidates === true || onlyNewCandidates === 'true') {
+      const seenEmails = new Set<string>();
+      const seenPhones = new Set<string>();
+      const seenNames = new Set<string>();
+      applicants = applicants.filter(a => {
+        if (a.isDuplicate || (a as any).is_duplicate === 1) return false;
+        const normEmail = (a.email || '').trim().toLowerCase();
+        const normPhone = (a.phone || '').replace(/\D/g, '');
+        const normName = (a.fullName || '').trim().toLowerCase();
+
+        if (normEmail && normEmail.includes('@') && !['unknown', 'n/a', 'none', 'no email'].includes(normEmail)) {
+          if (seenEmails.has(normEmail)) return false;
+          seenEmails.add(normEmail);
+        }
+        if (normPhone && normPhone.length >= 7) {
+          const pKey = normPhone.slice(-10);
+          if (seenPhones.has(pKey)) return false;
+          seenPhones.add(pKey);
+        }
+        if (!normEmail && !normPhone && normName) {
+          const nKey = `${normName}:${a.jobTitle || ''}`;
+          if (seenNames.has(nKey)) return false;
+          seenNames.add(nKey);
+        }
+        return true;
+      });
+    }
+
     const rows = applicants.map(a => formatGoogleSheetsRow(a));
     const tsvWithHeaders = generateGoogleSheetsTsv(rows, true);
     const tsvNoHeaders = generateGoogleSheetsTsv(rows, false);

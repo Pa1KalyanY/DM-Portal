@@ -2649,6 +2649,10 @@ export class DatabaseService {
     endDate?: string;
     ids?: string[];
     nameMatchCategory?: string;
+    search?: string;
+    role?: string;
+    uniqueOnly?: boolean;
+    onlyNewCandidates?: boolean;
   }): Applicant[] {
     const conditions: string[] = [];
     const values: any[] = [];
@@ -2706,10 +2710,53 @@ export class DatabaseService {
       values.push(...filters.ids);
     }
 
+    if (filters.uniqueOnly || filters.onlyNewCandidates) {
+      conditions.push('(is_duplicate = 0 OR is_duplicate IS NULL)');
+    }
+
+    if (filters.onlyNewCandidates && filters.company && filters.company !== 'All' && filters.company !== 'Both') {
+      conditions.push(`(
+        master_person_id IS NULL OR master_person_id NOT IN (
+          SELECT person_id FROM master_applications WHERE company = ? GROUP BY person_id HAVING COUNT(*) > 1
+        )
+      )`);
+      values.push(filters.company);
+    }
+
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const stmt = this.db.prepare(`SELECT * FROM applicants ${whereClause} ORDER BY source_file, source_row_number`);
     const rows = stmt.all(...values) as any[];
-    return rows.map(r => this.mapRowToApplicant(r));
+    let applicants = rows.map(r => this.mapRowToApplicant(r));
+
+    if (filters.uniqueOnly || filters.onlyNewCandidates) {
+      const seenEmails = new Set<string>();
+      const seenPhones = new Set<string>();
+      const seenNames = new Set<string>();
+      applicants = applicants.filter(a => {
+        if (a.isDuplicate) return false;
+        const normEmail = (a.email || '').trim().toLowerCase();
+        const normPhone = (a.phone || '').replace(/\D/g, '');
+        const normName = (a.fullName || '').trim().toLowerCase();
+
+        if (normEmail && normEmail.includes('@') && !['unknown', 'n/a', 'none', 'no email'].includes(normEmail)) {
+          if (seenEmails.has(normEmail)) return false;
+          seenEmails.add(normEmail);
+        }
+        if (normPhone && normPhone.length >= 7) {
+          const pKey = normPhone.slice(-10);
+          if (seenPhones.has(pKey)) return false;
+          seenPhones.add(pKey);
+        }
+        if (!normEmail && !normPhone && normName) {
+          const nKey = `${normName}:${a.jobTitle || ''}`;
+          if (seenNames.has(nKey)) return false;
+          seenNames.add(nKey);
+        }
+        return true;
+      });
+    }
+
+    return applicants;
   }
 
   private mapRowToApplicant(r: any): Applicant {
