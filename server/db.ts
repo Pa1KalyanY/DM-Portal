@@ -5603,11 +5603,12 @@ export class DatabaseService {
         this.db.prepare('DELETE FROM master_person_emails').run();
         this.db.prepare('DELETE FROM master_person_phones').run();
         this.db.prepare('DELETE FROM incomplete_records').run();
-        this.db.prepare('DELETE FROM applicants').run();
-        this.db.prepare('DELETE FROM import_files').run();
-        this.db.prepare('DELETE FROM imports').run();
+        this.db.prepare('DELETE FROM master_transfers').run();
+        this.db.prepare("UPDATE applicants SET transfer_status = 'Not Transferred', transferred_at = NULL, master_person_id = NULL").run();
         this.db.prepare('DELETE FROM master_people').run();
       } else {
+        // Strict Company Isolation (Section 2): Delete ONLY records for the selected company.
+        // Other companies (e.g. ClinisolTech when clearing AaraTech) remain 100% untouched and preserved!
         this.db.prepare('DELETE FROM master_recruiter_contacts WHERE person_id IN (SELECT id FROM master_people WHERE company = ?)').run(company);
         this.db.prepare('DELETE FROM master_recruiter_assignments WHERE person_id IN (SELECT id FROM master_people WHERE company = ?)').run(company);
         this.db.prepare('DELETE FROM master_possible_matches WHERE company = ?').run(company);
@@ -5616,9 +5617,8 @@ export class DatabaseService {
         this.db.prepare('DELETE FROM master_person_emails WHERE person_id IN (SELECT id FROM master_people WHERE company = ?)').run(company);
         this.db.prepare('DELETE FROM master_person_phones WHERE person_id IN (SELECT id FROM master_people WHERE company = ?)').run(company);
         this.db.prepare('DELETE FROM incomplete_records WHERE company = ?').run(company);
-        this.db.prepare('DELETE FROM applicants WHERE company = ?').run(company);
-        this.db.prepare('DELETE FROM import_files WHERE import_id IN (SELECT id FROM imports WHERE company = ?)').run(company);
-        this.db.prepare('DELETE FROM imports WHERE company = ?').run(company);
+        this.db.prepare('DELETE FROM master_transfers WHERE company = ?').run(company);
+        this.db.prepare("UPDATE applicants SET transfer_status = 'Not Transferred', transferred_at = NULL, master_person_id = NULL WHERE company = ?").run(company);
         this.db.prepare('DELETE FROM master_people WHERE company = ?').run(company);
       }
       this.db.exec('COMMIT');

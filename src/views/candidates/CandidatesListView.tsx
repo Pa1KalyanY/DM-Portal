@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { dbService, getCandidateDateApplied } from '../../services/masterDbService';
 import { api } from '../../api/client';
-import { Person, CandidateStatus, Gender } from '../../types/masterDatabase';
+import { Person, CandidateStatus, Gender, CompanyName } from '../../types/masterDatabase';
 import { IncompleteProfilesView } from '../incomplete/IncompleteProfilesView';
 import { ImportView } from '../upload/ImportView';
 import { isPhoneNumber, extractCandidateNameFromEmail, cleanJobTitle, formatPureDigitsPhone } from '../../shared/normalization';
@@ -633,22 +633,30 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
   };
 
   const handleClearDatabaseClick = async () => {
-    const scopeMsg = selectedCompany !== 'All' ? `for ${selectedCompany}` : 'for all companies';
-    if (
-      !window.confirm(
-        `Are you sure you want to completely clear all master candidate data ${scopeMsg}?\n\nThis will wipe all candidate profiles from IndexedDB, SQLite database, and cloud storage, resetting the database to 0 candidates for fresh recruitment.`
-      )
-    ) {
+    // Strictly isolate company scope (Prompt Section 2):
+    const targetCompany: CompanyName | 'all' =
+      selectedCompany !== 'All'
+        ? (selectedCompany as CompanyName)
+        : (currentUserCompany !== 'Both' ? (currentUserCompany as CompanyName) : 'all');
+
+    const otherCompany =
+      targetCompany === 'AaraTech' ? 'ClinisolTech' : (targetCompany === 'ClinisolTech' ? 'AaraTech' : null);
+
+    const confirmMessage = targetCompany !== 'all'
+      ? `Are you sure you want to completely clear all master candidate data for ${targetCompany}?\n\nThis will reset ${targetCompany} to 0 candidate profiles for fresh recruitment.\n\n${otherCompany ? `IMPORTANT: All ${otherCompany} candidate profiles, applications, and recruiter feedback will remain 100% UNTOUCHED and preserved.` : ''}`
+      : `Are you sure you want to completely clear all master candidate data across ALL companies?`;
+
+    if (!window.confirm(confirmMessage)) {
       return;
     }
     setLoading(true);
     try {
-      await dbService.clearAllData();
+      await dbService.clearAllData(targetCompany);
       await fetchCandidates();
       fetchIncompleteBadge();
       setBatchToast({
         type: 'success',
-        message: 'Master database successfully cleared! 0 candidate records remaining.',
+        message: `Master database successfully cleared for ${targetCompany !== 'all' ? targetCompany : 'all companies'}! 0 candidate records remaining.`,
       });
       setTimeout(() => setBatchToast(null), 5000);
     } catch (err: any) {
@@ -807,12 +815,21 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
                 <span>Page CSV</span>
               </button>
               <button
+                type="button"
                 onClick={handleClearDatabaseClick}
                 className="btn-secondary !text-xs !py-1.5 shadow-2xs cursor-pointer text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-200"
-                title="Wipe master candidate database to 0 records and start 100% fresh"
+                title={
+                  selectedCompany !== 'All'
+                    ? `Wipe ${selectedCompany} master candidate database to 0 records (other companies preserved)`
+                    : (currentUserCompany !== 'Both'
+                        ? `Wipe ${currentUserCompany} master candidate database to 0 records (other companies preserved)`
+                        : 'Wipe master candidate database to 0 records and start 100% fresh')
+                }
               >
                 <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                <span>Clear Database</span>
+                <span>
+                  Clear {selectedCompany !== 'All' ? `${selectedCompany} ` : (currentUserCompany !== 'Both' ? `${currentUserCompany} ` : '')}Database
+                </span>
               </button>
             </div>
           </div>

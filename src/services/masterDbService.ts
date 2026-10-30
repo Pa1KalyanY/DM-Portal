@@ -711,7 +711,50 @@ class LocalDatabaseStore {
     }
   }
 
-  async clearAllCandidateData(): Promise<void> {
+  async clearAllCandidateData(company: CompanyName | 'all' = 'all'): Promise<void> {
+    if (company && company !== 'all') {
+      // Company-Scoped Clear: Strictly preserve other company's candidate data (Prompt Section 2)!
+      this.people = this.people.filter(p => p.company !== company);
+      this.imports = this.imports.filter(i => (i as any).company !== company);
+      this.possibleMatches = this.possibleMatches.filter(m => (m as any).company !== company);
+      this.incompleteRecords = this.incompleteRecords.filter(r => (r as any).company !== company);
+
+      try {
+        // Keep other company's data in IndexedDB
+        const allPeople = await indexedDBService.getAll<Person>('people');
+        const keptPeople = allPeople.filter(p => p.company !== company);
+        await indexedDBService.clearStore('people');
+        if (keptPeople.length > 0) {
+          await indexedDBService.putBatch('people', keptPeople);
+        }
+
+        const allInc = await indexedDBService.getAll<IncompleteRecord>('incompleteRecords');
+        const keptInc = allInc.filter(r => r.company !== company);
+        await indexedDBService.clearStore('incompleteRecords');
+        if (keptInc.length > 0) {
+          await indexedDBService.putBatch('incompleteRecords', keptInc);
+        }
+
+        const allMatches = await indexedDBService.getAll<PossibleMatch>('possibleMatches');
+        const keptMatches = allMatches.filter(m => (m as any).company !== company);
+        await indexedDBService.clearStore('possibleMatches');
+        if (keptMatches.length > 0) {
+          await indexedDBService.putBatch('possibleMatches', keptMatches);
+        }
+
+        // Update local memory cache without nuking other company
+        localStorage.setItem('aat_store_people', JSON.stringify(this.people));
+      } catch (e) {
+        console.warn(`Storage clear notice for ${company}:`, e);
+      }
+
+      try {
+        window.dispatchEvent(new CustomEvent('workspace-data-updated', { detail: { action: 'cleared-company', company } }));
+      } catch {}
+      return;
+    }
+
+    // Global clear across all companies
     this.people = [];
     this.imports = [];
     this.possibleMatches = [];
@@ -729,11 +772,6 @@ class LocalDatabaseStore {
       localStorage.removeItem('aat_store_matches');
       localStorage.removeItem('aat_store_audit');
       localStorage.removeItem('aat_store_merges');
-      try {
-        await api.clearAllMasterCandidates('all');
-      } catch (err) {
-        console.warn('Backend clearMasterCandidates notice:', err);
-      }
     } catch (e) {
       console.warn('Storage clear notice:', e);
     }
@@ -765,31 +803,41 @@ export function getCandidateDateApplied(p: Person): string {
 
 export const dbService = {
   /**
-   * Clear all candidate data, imports, and duplicate flags for a 100% clean fresh slate
+   * Clear candidate data for a specific company or all companies with strict company isolation
    */
-  async clearAllData(): Promise<void> {
-    await localStore.clearAllCandidateData();
+  async clearAllData(company: CompanyName | 'all' = 'all'): Promise<void> {
+    await localStore.clearAllCandidateData(company);
     try {
-      await api.clearAllMasterCandidates('all');
+      await api.clearAllMasterCandidates(company);
     } catch (e) {
-      console.warn('Backend remote clear notice:', e);
+      console.warn(`Backend remote clear notice for ${company}:`, e);
     }
     const client = getSupabaseClient();
     if (client) {
       try {
-        await client.from('possible_matches').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await client.from('recruiter_contacts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await client.from('person_status_history').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await client.from('merge_history').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await client.from('applications').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await client.from('person_emails').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await client.from('person_phones').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await client.from('people').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await client.from('imports').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        await client.from('audit_log').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        try {
-          await client.from('incomplete_records').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-        } catch {}
+        if (company && company !== 'all') {
+          await client.from('possible_matches').delete().eq('company', company);
+          await client.from('people').delete().eq('company', company);
+          await client.from('applications').delete().eq('company', company);
+          await client.from('imports').delete().eq('company', company);
+          try {
+            await client.from('incomplete_records').delete().eq('company', company);
+          } catch {}
+        } else {
+          await client.from('possible_matches').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          await client.from('recruiter_contacts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          await client.from('person_status_history').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          await client.from('merge_history').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          await client.from('applications').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          await client.from('person_emails').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          await client.from('person_phones').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          await client.from('people').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          await client.from('imports').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          await client.from('audit_log').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          try {
+            await client.from('incomplete_records').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+          } catch {}
+        }
       } catch (e) {
         console.warn('Supabase remote clear error:', e);
       }
