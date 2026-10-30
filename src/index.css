@@ -1,0 +1,304 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    
+    /* 1. Sidebar Deep Ink-Navy Tokens */
+    --sidebar-bg: #18243A;
+    --sidebar-hover: #25334C;
+    --sidebar-active: #2A3852;
+    --sidebar-active-indicator: #6E8BFF;
+    --sidebar-text-primary: #F7F9FD;
+    --sidebar-text-secondary: #B9C5D9;
+    --sidebar-divider: #34415A;
+
+    /* 2. Main Workspace Surfaces */
+    --surface-canvas: #F1F4F9;
+    --surface-card: #FFFFFF;
+    --surface-secondary: #F7F9FC;
+    --surface-elevated: #FFFFFF;
+
+    /* Typography / Text */
+    --text-primary: #18243A;
+    --text-secondary: #65738B;
+    --text-muted: #8995A8;
+
+    /* Borders */
+    --border-subtle: #E0E6EF;
+    --border-strong: #CBD5E1;
+
+    /* Brand / Sapphire */
+    --brand-primary: #3659D9;
+    --brand-hover: #2948BC;
+    --brand-soft-bg: #E8EDFA;
+    --brand-soft-text: #2948BC;
+
+    /* Semantic Status Colors */
+    --status-pass-bg: #E6F5F1;
+    --status-pass-border: #A3DCD0;
+    --status-pass-text: #16836B;
+
+    --status-review-bg: #FEF6E9;
+    --status-review-border: #F8D8A8;
+    --status-review-text: #A66B19;
+
+    --status-fail-bg: #FDF0F1;
+    --status-fail-border: #F6C1C5;
+    --status-fail-text: #C44750;
+
+    --status-info-bg: #EEF2FD;
+    --status-info-border: #C4D1FA;
+    --status-info-text: #4A63C7;
+
+    --status-dup-bg: #F1F4F9;
+    --status-dup-border: #E0E6EF;
+    --status-dup-text: #65738B;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--surface-canvas);
+    color: var(--text-primary);
+    margin: 0;
+    padding: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Standardize tabular numbers for all numerical metrics & tables */
+  .tabular-nums,
+  table,
+  td,
+  th,
+  .metric-value {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Custom Sleek Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #F1F4F9;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #8995A8;
+}
+
+/* Standardized Status Badges */
+.badge-pass {
+  background-color: #E6F5F1;
+  color: #16836B;
+  border: 1px solid #A3DCD0;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 11px;
+  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-review {
+  background-color: #FEF6E9;
+  color: #A66B19;
+  border: 1px solid #F8D8A8;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 11px;
+  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-fail {
+  background-color: #FDF0F1;
+  color: #C44750;
+  border: 1px solid #F6C1C5;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 11px;
+  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-dup {
+  background-color: #F1F4F9;
+  color: #65738B;
+  border: 1px solid #E0E6EF;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 11px;
+  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-info {
+  background-color: #EEF2FD;
+  color: #4A63C7;
+  border: 1px solid #C4D1FA;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 11px;
+  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-neutral {
+  background-color: #F7F9FC;
+  color: #65738B;
+  border: 1px solid #E0E6EF;
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 11px;
+  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Card Elevation & Shadows */
+.card-premium {
+  background-color: #FFFFFF;
+  border: 1px solid #E0E6EF;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(24, 36, 58, 0.04);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.card-premium:hover {
+  border-color: #CBD5E1;
+  box-shadow: 0 2px 6px 0 rgba(24, 36, 58, 0.06);
+}
+
+/* Operational Tables */
+.table-premium {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+}
+
+.table-premium th {
+  background-color: #F7F9FC;
+  color: #65738B;
+  font-weight: 600;
+  padding: 9px 12px;
+  border-bottom: 1px solid #E0E6EF;
+  text-align: left;
+}
+
+.table-premium td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #E0E6EF;
+  color: #18243A;
+  background-color: #FFFFFF;
+}
+
+.table-premium tr:hover td {
+  background-color: #F4F7FD;
+}
+
+.table-premium tr.selected td {
+  background-color: #E8EDFA;
+}
+
+/* Standardized Button Hierarchy */
+.btn-primary {
+  background-color: #3659D9;
+  color: #FFFFFF;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 8px 16px;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  box-shadow: 0 1px 2px rgba(54, 89, 217, 0.2);
+  cursor: pointer;
+}
+.btn-primary:hover:not(:disabled) {
+  background-color: #2948BC;
+}
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background-color: #E8EDFA;
+  color: #2948BC;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 8px 16px;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #D0DBF5;
+  cursor: pointer;
+}
+.btn-secondary:hover:not(:disabled) {
+  background-color: #DCE4F7;
+  color: #1E3BB3;
+}
+.btn-secondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-tertiary, .btn-neutral {
+  background-color: #FFFFFF;
+  color: #18243A;
+  font-weight: 500;
+  border-radius: 8px;
+  padding: 8px 16px;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #E0E6EF;
+  cursor: pointer;
+}
+.btn-tertiary:hover:not(:disabled), .btn-neutral:hover:not(:disabled) {
+  background-color: #F1F4F9;
+  border-color: #CBD5E1;
+}
+
+.btn-destructive {
+  background-color: #FDF0F1;
+  color: #C44750;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 8px 16px;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #F6C1C5;
+  cursor: pointer;
+}
+.btn-destructive:hover:not(:disabled) {
+  background-color: #FAE4E6;
+  border-color: #F19EA5;
+}
+

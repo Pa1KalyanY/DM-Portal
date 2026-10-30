@@ -1,0 +1,1641 @@
+{
+  "metadata": {
+    "generated_at": "2026-10-21T20:34:27.807Z",
+    "source_origin": "http://localhost:5174",
+    "storage_engine": "Chrome IndexedDB (aaratech_clinisoltech_master_db leveldb)",
+    "total_occurrences_extracted": 65,
+    "unique_verbatim_texts": 21,
+    "reconciliation_summary": {
+      "Confident": 5,
+      "Ambiguous": 51,
+      "Unmatched": 9
+    }
+  },
+  "occurrences": [
+    {
+      "occurrence_index": 1,
+      "source_file": "000017.ldb",
+      "source_offset": 1108013,
+      "source_contact_id": "441edb77-4a02-4b32-b5c6-8eea70722e0e",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "Alex\nNumber is not correct",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "8133584097",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 8133584097 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 2,
+      "source_file": "000017.ldb",
+      "source_offset": 1257849,
+      "source_contact_id": "de473b66-7ce9-4272-a7ee-dc698cf139e5",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "7085818272",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 7085818272 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 3,
+      "source_file": "000017.ldb",
+      "source_offset": 1480985,
+      "source_contact_id": "81e3d3d7-ac89-459a-91e6-63586d2dd186",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-10-17",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "ClinisolTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "3138580839",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Confident",
+        "match_method": "primary_phone",
+        "matched_candidate_id": "mp-1792210173833-90dl6n",
+        "matched_candidate_person_id": "P-000232",
+        "matched_candidate_name": "VAISHNAVI YALLALA",
+        "notes": ""
+      }
+    },
+    {
+      "occurrence_index": 4,
+      "source_file": "000017.ldb",
+      "source_offset": 1556704,
+      "source_contact_id": "374525e0-d809-4753-8596-468c718f1c3c",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": "P-001881",
+        "phone": "8184017276",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present (P-001881 / 8184017276 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 5,
+      "source_file": "000017.ldb",
+      "source_offset": 1572535,
+      "source_contact_id": "f72df379-af6e-454f-a7d7-663e6ed85dea",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "no # sent e�",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "8133799849",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 8133799849 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 6,
+      "source_file": "000017.ldb",
+      "source_offset": 1659433,
+      "source_contact_id": "9c0a84dc-85c1-4548-ad29-9c15c84812da",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "DiceDM\nAdai",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Unmatched",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Insufficient identifying information in record window."
+      }
+    },
+    {
+      "occurrence_index": 7,
+      "source_file": "000017.ldb",
+      "source_offset": 1694117,
+      "source_contact_id": "88ee5603-ac0b-4290-bea6-149633ec5812",
+      "recruiter_name": "Alex",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "Alex\n///",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "4807650253",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 4807650253 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 8,
+      "source_file": "000017.ldb",
+      "source_offset": 1703938,
+      "source_contact_id": "b67edc0f-45f2-4b71-9e15-7bee25cffa35",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "# not found sent ���",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": "P-003069",
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present (P-003069 /  / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 9,
+      "source_file": "000017.ldb",
+      "source_offset": 1815344,
+      "source_contact_id": "962ba0c3-c11b-483e-aed3-6d57d62e7f37",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "7323189178",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 7323189178 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 10,
+      "source_file": "000017.ldb",
+      "source_offset": 1846689,
+      "source_contact_id": "e4fb1a74-c0e8-4b92-a993-04331068c461",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "4433048668",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 4433048668 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 11,
+      "source_file": "000017.ldb",
+      "source_offset": 1960515,
+      "source_contact_id": "8bdcfd54-7278-4243-b0a9-05b956bbd4fe",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Unmatched",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Insufficient identifying information in record window."
+      }
+    },
+    {
+      "occurrence_index": 12,
+      "source_file": "000017.ldb",
+      "source_offset": 2060749,
+      "source_contact_id": "66b628e6-7477-43c8-8ac2-0a6201e52058",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "SVM/ �oDly working as per A��m`\nNo Response, Sent VM & E���0H{\u0018\rI�",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "4695869426",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 4695869426 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 13,
+      "source_file": "000018.ldb",
+      "source_offset": 82873,
+      "source_contact_id": "6251483d-0fa0-4551-8af1-3efaa77f3ee4",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No # sent ��e�(",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "9733936719",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 9733936719 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 14,
+      "source_file": "000018.ldb",
+      "source_offset": 138427,
+      "source_contact_id": "e68fad30-c47e-4469-bcdf-4ff853867a8f",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "8609229808",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 8609229808 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 15,
+      "source_file": "000018.ldb",
+      "source_offset": 231029,
+      "source_contact_id": "9a14100e-9e3b-4569-b135-aa3f494733f8",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "5623881973",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 5623881973 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 16,
+      "source_file": "000018.ldb",
+      "source_offset": 315184,
+      "source_contact_id": "1f6cf745-7ac3-4755-bdbb-b240f9ae79d0",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No number/ sent E�p�",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "2404241042",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 2404241042 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 17,
+      "source_file": "000018.ldb",
+      "source_offset": 426736,
+      "source_contact_id": "b8908b67-3309-4fcd-8faf-c4c7f1958988",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "8723066713",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 8723066713 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 18,
+      "source_file": "000018.ldb",
+      "source_offset": 568153,
+      "source_contact_id": "1ea5af62-22b0-4940-9d52-c7fe80426d7e",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "JYOTHISWAROOPPOPURI@GMAILCOM",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "8132037926",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 8132037926 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 19,
+      "source_file": "000018.ldb",
+      "source_offset": 606931,
+      "source_contact_id": "07c91451-3fef-4536-b303-7a6a57b2cead",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": "P-004655",
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present (P-004655 /  / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 20,
+      "source_file": "000018.ldb",
+      "source_offset": 647909,
+      "source_contact_id": "25fe6518-2c91-4547-8ac4-6404bb217c49",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "JANARDHANABANDARUO@GMAILCOM",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Unmatched",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Insufficient identifying information in record window."
+      }
+    },
+    {
+      "occurrence_index": 21,
+      "source_file": "000018.ldb",
+      "source_offset": 847207,
+      "source_contact_id": "819f0f0b-7eb8-41a3-9887-e358b9e1d28d",
+      "recruiter_name": "Adam",
+      "contact_date": "2025-05-07",
+      "contact_type": "Phone",
+      "verbatim_feedback": "DiceDM\nAdam",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "5599402372",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 5599402372 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 22,
+      "source_file": "000018.ldb",
+      "source_offset": 935693,
+      "source_contact_id": "91c82b4d-e881-4b28-beeb-20d03b3af4ef",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "ROHANKUMARVANAMALA09@GMAILCOM",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "9154551671",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 9154551671 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 23,
+      "source_file": "000018.ldb",
+      "source_offset": 1123096,
+      "source_contact_id": "3c14d145-a332-4d70-8600-f77241c5e6cc",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "DiceDM\nAdai",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": "P-001788",
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present (P-001788 /  / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 24,
+      "source_file": "000018.ldb",
+      "source_offset": 1166650,
+      "source_contact_id": "c2725e6b-6c86-47f5-97f4-470fa315162a",
+      "recruiter_name": "Alex",
+      "contact_date": "2026-10-17",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No #/ Sent EM",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "9404480814",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Confident",
+        "match_method": "primary_phone",
+        "matched_candidate_id": "mp-1792210173876-pw1kqa",
+        "matched_candidate_person_id": "P-000584",
+        "matched_candidate_name": "Sai Chan",
+        "notes": ""
+      }
+    },
+    {
+      "occurrence_index": 25,
+      "source_file": "000018.ldb",
+      "source_offset": 1339622,
+      "source_contact_id": "363072a4-adc8-4096-91a9-a2c36c34054a",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "9402273726",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 9402273726 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 26,
+      "source_file": "000018.ldb",
+      "source_offset": 2027684,
+      "source_contact_id": "4220cddb-e1ab-421d-a501-5310af1d89ff",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "8474571448",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 8474571448 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 27,
+      "source_file": "000019.ldb",
+      "source_offset": 79480,
+      "source_contact_id": "0b4084c9-f3e8-448c-8845-c27eb63a8bb5",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Unmatched",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Insufficient identifying information in record window."
+      }
+    },
+    {
+      "occurrence_index": 28,
+      "source_file": "000019.ldb",
+      "source_offset": 155281,
+      "source_contact_id": "a36d9821-becf-4359-897d-270376a112b7",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "8067023687",
+        "email": "chhetribhojan9@gmail.com"
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 8067023687 / chhetribhojan9@gmail.com) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 29,
+      "source_file": "000019.ldb",
+      "source_offset": 261448,
+      "source_contact_id": "35b1d228-e557-4237-b350-d2edae1dcf53",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": "P-002002",
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present (P-002002 /  / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 30,
+      "source_file": "000022.ldb",
+      "source_offset": 119601,
+      "source_contact_id": "ba1681d1-9cc5-4fce-8552-98ccbcd75e1e",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "RAVIHARANADHREDDY@GMAILCOM",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Unmatched",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Insufficient identifying information in record window."
+      }
+    },
+    {
+      "occurrence_index": 31,
+      "source_file": "000022.ldb",
+      "source_offset": 150957,
+      "source_contact_id": "cfb39f21-4f10-4508-b459-a246677b651f",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "DiceDM\nAda�",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "6033207331",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 6033207331 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 32,
+      "source_file": "000022.ldb",
+      "source_offset": 213327,
+      "source_contact_id": "03e15266-1710-4614-8c01-643d1cbeb65d",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "2108160502",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 2108160502 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 33,
+      "source_file": "000022.ldb",
+      "source_offset": 314161,
+      "source_contact_id": "5f4f9ea1-3300-4dea-b857-8dedf01aef7a",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No # sent ��e�",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "7749257726",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 7749257726 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 34,
+      "source_file": "000022.ldb",
+      "source_offset": 388310,
+      "source_contact_id": "b67edc0f-45f2-4b71-9e15-7bee25cffa35",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "# not found sent ���",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "6825973644",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 6825973644 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 35,
+      "source_file": "000022.ldb",
+      "source_offset": 398390,
+      "source_contact_id": "88ee5603-ac0b-4290-bea6-149633ec5812",
+      "recruiter_name": "Alex",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "Alex\n///",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "3154981575",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 3154981575 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 36,
+      "source_file": "000022.ldb",
+      "source_offset": 433445,
+      "source_contact_id": "37c87321-0fa6-42db-a0fe-02edcad459d9",
+      "recruiter_name": "Sai",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "DiceDM\nAdai",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": "P-003250",
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present (P-003250 /  / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 37,
+      "source_file": "000022.ldb",
+      "source_offset": 523567,
+      "source_contact_id": "f72df379-af6e-454f-a7d7-663e6ed85dea",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "no # sent e�",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Unmatched",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Insufficient identifying information in record window."
+      }
+    },
+    {
+      "occurrence_index": 38,
+      "source_file": "000022.ldb",
+      "source_offset": 539864,
+      "source_contact_id": "374525e0-d809-4753-8596-468c718f1c3c",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "3146901128",
+        "email": "2@crimson.ua.edu"
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 3146901128 / 2@crimson.ua.edu) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 39,
+      "source_file": "000022.ldb",
+      "source_offset": 619612,
+      "source_contact_id": "81e3d3d7-ac89-459a-91e6-63586d2dd186",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Unmatched",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Insufficient identifying information in record window."
+      }
+    },
+    {
+      "occurrence_index": 40,
+      "source_file": "000022.ldb",
+      "source_offset": 849499,
+      "source_contact_id": "de473b66-7ce9-4272-a7ee-dc698cf139e5",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "2565229805",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 2565229805 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 41,
+      "source_file": "000022.ldb",
+      "source_offset": 867598,
+      "source_contact_id": "de1d19d9-c310-4b88-97f2-af50b8f55815",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "no # sent �`�",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "5135458129",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 5135458129 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 42,
+      "source_file": "000022.ldb",
+      "source_offset": 919043,
+      "source_contact_id": "7bd74357-a23c-43b3-b5b9-38d21049ebaf",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No number, Sent e�c�",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "6824036595",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 6824036595 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 43,
+      "source_file": "000024.ldb",
+      "source_offset": 155999,
+      "source_contact_id": "eae3f016-8c83-4a01-9292-2f2995da68b6",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "7184193981",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 7184193981 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 44,
+      "source_file": "000024.ldb",
+      "source_offset": 204912,
+      "source_contact_id": "363072a4-adc8-4096-91a9-a2c36c34054a",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-10-21",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "ClinisolTech",
+      "extracted_identifiers": {
+        "person_id": "P-001548",
+        "phone": "5122737513",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Confident",
+        "match_method": "person_id",
+        "matched_candidate_id": "mp-1792590230285-5jhqkw",
+        "matched_candidate_person_id": "P-001548",
+        "matched_candidate_name": "Carlos Colon III",
+        "notes": ""
+      }
+    },
+    {
+      "occurrence_index": 45,
+      "source_file": "000024.ldb",
+      "source_offset": 406764,
+      "source_contact_id": "5f70cbac-af37-4cf9-90d5-ca308d18b53c",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "3145480792",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 3145480792 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 46,
+      "source_file": "000024.ldb",
+      "source_offset": 412869,
+      "source_contact_id": "c8cc8cf2-93d0-4c4c-997f-16344df852e6",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-10-19",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No number mena�",
+      "source_company": null,
+      "assigned_company": "ClinisolTech",
+      "extracted_identifiers": {
+        "person_id": "P-001019",
+        "phone": "7262091852",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Confident",
+        "match_method": "person_id",
+        "matched_candidate_id": "mp-1792439669727-d4b0b1",
+        "matched_candidate_person_id": "P-001019",
+        "matched_candidate_name": "Ronnie Roy",
+        "notes": ""
+      }
+    },
+    {
+      "occurrence_index": 47,
+      "source_file": "000024.ldb",
+      "source_offset": 441265,
+      "source_contact_id": "e564ffc1-d587-4011-aa68-489b37dfe4ee",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No # sent ��e�",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "4692402879",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 4692402879 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 48,
+      "source_file": "000024.ldb",
+      "source_offset": 616866,
+      "source_contact_id": "91c82b4d-e881-4b28-beeb-20d03b3af4ef",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "ROHANKUMARVANAMALA09@GMAILCOM",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "9405364494",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 9405364494 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 49,
+      "source_file": "000024.ldb",
+      "source_offset": 700857,
+      "source_contact_id": "c616a0bd-af44-40aa-9420-3d787b44a433",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No # sent e�ae�",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "9403314477",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 9403314477 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 50,
+      "source_file": "000024.ldb",
+      "source_offset": 710430,
+      "source_contact_id": "819f0f0b-7eb8-41a3-9887-e358b9e1d28d",
+      "recruiter_name": "Adam",
+      "contact_date": "2025-05-07",
+      "contact_type": "Phone",
+      "verbatim_feedback": "DiceDM\nAdam",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "6169005883",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 6169005883 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 51,
+      "source_file": "000024.ldb",
+      "source_offset": 741777,
+      "source_contact_id": "e21cf0be-858a-4fe7-b832-66d1eaca14fc",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-10-21",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "ClinisolTech",
+      "extracted_identifiers": {
+        "person_id": "P-001260",
+        "phone": "9373131413",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Confident",
+        "match_method": "person_id",
+        "matched_candidate_id": "mp-1792589166236-gdypwc",
+        "matched_candidate_person_id": "P-001260",
+        "matched_candidate_name": "Meghashyam N",
+        "notes": ""
+      }
+    },
+    {
+      "occurrence_index": 52,
+      "source_file": "000024.ldb",
+      "source_offset": 904694,
+      "source_contact_id": "54f9c6cf-803e-4ed5-a93d-363818032d5e",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "8628328198",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 8628328198 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 53,
+      "source_file": "000024.ldb",
+      "source_offset": 912607,
+      "source_contact_id": "25fe6518-2c91-4547-8ac4-6404bb217c49",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "JANARDHANABANDARUO@GMAILCOM",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "4128196798",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 4128196798 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 54,
+      "source_file": "000024.ldb",
+      "source_offset": 994978,
+      "source_contact_id": "1ea5af62-22b0-4940-9d52-c7fe80426d7e",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "JYOTHISWAROOPPOPURI@GMAILCOM",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "9702998416",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 9702998416 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 55,
+      "source_file": "000024.ldb",
+      "source_offset": 1112547,
+      "source_contact_id": "ae0b2146-7411-4f0e-99ec-9d01a4f742a2",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "6615292647",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 6615292647 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 56,
+      "source_file": "000024.ldb",
+      "source_offset": 1258541,
+      "source_contact_id": "1f6cf745-7ac3-4755-bdbb-b240f9ae79d0",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No number/ sent E�p�",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "8329814388",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 8329814388 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 57,
+      "source_file": "000024.ldb",
+      "source_offset": 1312400,
+      "source_contact_id": "95cde24d-50bc-42ae-98f2-641b85e3298d",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "9404533633",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 9404533633 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 58,
+      "source_file": "000024.ldb",
+      "source_offset": 1345006,
+      "source_contact_id": "9a14100e-9e3b-4569-b135-aa3f494733f8",
+      "recruiter_name": "Adam",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "9133536388",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 9133536388 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 59,
+      "source_file": "000026.ldb",
+      "source_offset": 469803,
+      "source_contact_id": "35b1d228-e557-4237-b350-d2edae1dcf53",
+      "recruiter_name": "deelizab",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": "P-004716",
+        "phone": "4703439576",
+        "email": "mithunkranthi@gmail.com"
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present (P-004716 / 4703439576 / mithunkranthi@gmail.com) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 60,
+      "source_file": "000026.ldb",
+      "source_offset": 473270,
+      "source_contact_id": "118358e2-7962-4137-a435-3161443006e0",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "4703101748",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 4703101748 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 61,
+      "source_file": "000026.ldb",
+      "source_offset": 489027,
+      "source_contact_id": "2c836227-b92b-4273-99cc-f55728c94492",
+      "recruiter_name": "Alex",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "Alex\n///",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "5636507775",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 5636507775 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 62,
+      "source_file": "000026.ldb",
+      "source_offset": 579897,
+      "source_contact_id": "a36d9821-becf-4359-897d-270376a112b7",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": "AaraTech",
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "7792767033",
+        "email": "chhetribhojan9@gmail.com"
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 7792767033 / chhetribhojan9@gmail.com) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 63,
+      "source_file": "000026.ldb",
+      "source_offset": 811845,
+      "source_contact_id": "4220cddb-e1ab-421d-a501-5310af1d89ff",
+      "recruiter_name": "Sai",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Unmatched",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Insufficient identifying information in record window."
+      }
+    },
+    {
+      "occurrence_index": 64,
+      "source_file": "000026.ldb",
+      "source_offset": 940043,
+      "source_contact_id": "3d645553-227b-42df-be75-8a374cc0b0aa",
+      "recruiter_name": "Recruiter Admin",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "No Number",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": "5162003085",
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Ambiguous",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Identifier present ( / 5162003085 / ) but not found in current SQLite master_people. May belong to incomplete queue or unmerged import."
+      }
+    },
+    {
+      "occurrence_index": 65,
+      "source_file": "000026.ldb",
+      "source_offset": 952150,
+      "source_contact_id": "cea2b2e6-28cb-4ba9-bc03-5abe21fd9032",
+      "recruiter_name": "Alex",
+      "contact_date": "2026-02-01",
+      "contact_type": "Phone",
+      "verbatim_feedback": "Alex\n///",
+      "source_company": null,
+      "assigned_company": "AaraTech",
+      "extracted_identifiers": {
+        "person_id": null,
+        "phone": null,
+        "email": null
+      },
+      "reconciliation": {
+        "status": "Unmatched",
+        "match_method": "None",
+        "matched_candidate_id": null,
+        "matched_candidate_person_id": null,
+        "matched_candidate_name": null,
+        "notes": "Insufficient identifying information in record window."
+      }
+    }
+  ]
+}
