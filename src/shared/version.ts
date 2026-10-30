@@ -34,3 +34,4 @@ export const CURRENT_VERSION: VersionInfo = {
     'Comprehensive error boundary protection preventing blank page crashes',
   ],
 };
+

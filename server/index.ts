@@ -552,12 +552,7 @@ app.post('/api/process-files', upload.array('files', 50), async (req: Request, r
     dbService.createImport(importRecord, company, applicationDate, jobSlots);
     dbService.insertApplicantsBatch(allApplicantsToInsert, company, importId, applicationDate);
 
-    try {
-      const applicantIds = allApplicantsToInsert.map(a => a.id);
-      dbService.promoteApplicationsToMaster(company, applicantIds);
-    } catch (promoteErr) {
-      console.error('[Import] Auto-promotion error:', promoteErr);
-    }
+    // Note: Promotion to Master Candidate Database is an explicit recruiter action via POST /api/transfer-passed-to-master (Phase 2)
 
     dbService.addAuditLog({
       id: `audit-${Date.now()}`,
@@ -870,12 +865,7 @@ app.post('/api/process-pasted-data', async (req: Request, res: Response): Promis
     dbService.createImport(importRecord, finalCompany, applicationDate, jobSlots);
     dbService.insertApplicantsBatch(allApplicantsToInsert, finalCompany, importId, applicationDate);
 
-    try {
-      const applicantIds = allApplicantsToInsert.map((a) => a.id);
-      dbService.promoteApplicationsToMaster(finalCompany, applicantIds);
-    } catch (promoteErr) {
-      console.error('[Paste] Auto-promotion error:', promoteErr);
-    }
+    // Note: Promotion to Master Candidate Database is an explicit recruiter action via POST /api/transfer-passed-to-master (Phase 2)
 
     dbService.addAuditLog({
       id: `audit-${Date.now()}`,
@@ -1686,6 +1676,49 @@ app.post('/api/candidates/promote-applications', (req: Request, res: Response): 
     });
 
     res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// 10C. PHASE 2: CONTROLLED, PASSED-ONLY TRANSFER TO MASTER DB
+// -------------------------------------------------------------
+app.post(['/api/transfer-passed-to-master', '/api/applications/transfer-passed'], (req: Request, res: Response): void => {
+  try {
+    const company = (req.body.company as string) || (req.headers['x-company'] as string) || 'AaraTech';
+    if (company !== 'AaraTech' && company !== 'ClinisolTech') {
+      res.status(400).json({ error: `Invalid company context: '${company}'. Must be AaraTech or ClinisolTech.` });
+      return;
+    }
+
+    const batchId = (req.body.batchId as string) || undefined;
+    const applicantIds = Array.isArray(req.body.applicantIds) ? req.body.applicantIds : undefined;
+    const transferredBy = (req.body.transferredBy as string) || 'Recruiter Admin';
+
+    const result = dbService.transferPassedApplicationsToMaster(company as any, {
+      batchId,
+      applicantIds,
+      transferredBy,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error('[API /api/transfer-passed-to-master error]:', err);
+    res.status(500).json({ error: err.message || 'Failed to transfer passed applications to Master DB.' });
+  }
+});
+
+app.get('/api/transfer-status', (req: Request, res: Response): void => {
+  try {
+    const company = (req.query.company as string) || (req.headers['x-company'] as string) || 'AaraTech';
+    if (company !== 'AaraTech' && company !== 'ClinisolTech') {
+      res.status(400).json({ error: `Invalid company context: '${company}'. Must be AaraTech or ClinisolTech.` });
+      return;
+    }
+    const batchId = (req.query.batchId as string) || undefined;
+    const status = dbService.getTransferStatus(company as any, batchId);
+    res.json(status);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

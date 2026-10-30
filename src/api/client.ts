@@ -1131,6 +1131,75 @@ export const api = {
     }>;
   },
 
+  // Phase 2: Controlled Transfer of Final Approved Passed Applications to Master Candidate DB
+  transferPassedToMaster: async (params: {
+    company: 'AaraTech' | 'ClinisolTech';
+    batchId?: string;
+    applicantIds?: string[];
+    transferredBy?: string;
+  }) => {
+    const res = await fetch('/api/transfer-passed-to-master', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-company': params.company,
+      },
+      body: JSON.stringify(params),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Transfer failed' }));
+      throw new Error(err.error || 'Failed to transfer passed applications');
+    }
+    return res.json() as Promise<{
+      success: boolean;
+      company: 'AaraTech' | 'ClinisolTech';
+      totalEligiblePassed: number;
+      transferredCount: number;
+      newCandidatesCount: number;
+      existingCandidatesCount: number;
+      newApplicationsCount: number;
+      skippedDuplicatesCount: number;
+      possibleMatchesCount: number;
+      errorsCount: number;
+      batchId?: string;
+      message: string;
+      transfers: Array<{
+        applicantId: string;
+        applicantName: string;
+        jobTitle: string;
+        personId: string;
+        applicationId: string;
+        status: 'SUCCESS' | 'SKIPPED_EXISTING' | 'FAILED' | 'POSSIBLE_MATCH';
+        classification: string;
+        reason?: string;
+      }>;
+    }>;
+  },
+
+  getTransferStatus: async (company: 'AaraTech' | 'ClinisolTech', batchId?: string) => {
+    const query = new URLSearchParams();
+    query.set('company', company);
+    if (batchId) query.set('batchId', batchId);
+    const res = await fetch(`/api/transfer-status?${query.toString()}`, {
+      headers: { 'x-company': company },
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Failed to get transfer status' }));
+      throw new Error(err.error || 'Failed to get transfer status');
+    }
+    return res.json() as Promise<{
+      company: 'AaraTech' | 'ClinisolTech';
+      batchId?: string;
+      totalApplicants: number;
+      passedCount: number;
+      manualReviewCount: number;
+      failedCount: number;
+      transferredCount: number;
+      pendingTransferCount: number;
+      skippedCount: number;
+    }>;
+  },
+
   updateMasterCandidate: async (id: string, updates: Record<string, any>, user = 'Recruiter Admin') => {
     const res = await fetch(`/api/master-candidates/${encodeURIComponent(id)}`, {
       method: 'PATCH',

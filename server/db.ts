@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -78,7 +79,8 @@ export class DatabaseService {
     this.initTables();
     this.initDefaultRules();
     this.ensureReferenceMatchingInitialized();
-    this.ensureMasterPromotionInitialized();
+    // In Phase 2, promotion to Master Candidate Database is strictly manual & passed-only via transferPassedApplicationsToMaster
+    // this.ensureMasterPromotionInitialized();
   }
 
   private initTables() {
@@ -482,6 +484,45 @@ export class DatabaseService {
     try { this.db.exec("ALTER TABLE master_people ADD COLUMN h1b_status TEXT;"); } catch {}
     try { this.db.exec("ALTER TABLE master_applications ADD COLUMN green_card TEXT;"); } catch {}
     try { this.db.exec("ALTER TABLE master_applications ADD COLUMN h1b_status TEXT;"); } catch {}
+
+    // Phase 2: Master Transfers Table for Controlled, Idempotent Transfer Pipeline (Prompt Section 5 & 18)
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS master_transfers (
+        id TEXT PRIMARY KEY,
+        screening_applicant_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        company TEXT NOT NULL,
+        person_id TEXT,
+        application_id TEXT,
+        transfer_status TEXT NOT NULL,
+        duplicate_check_result TEXT NOT NULL,
+        transferred_at TEXT NOT NULL,
+        transferred_by TEXT DEFAULT 'Recruiter Admin',
+        error_message TEXT,
+        retry_count INTEGER DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_mt_applicant ON master_transfers(screening_applicant_id);
+      CREATE INDEX IF NOT EXISTS idx_mt_company_batch ON master_transfers(company, batch_id);
+      CREATE INDEX IF NOT EXISTS idx_mt_status ON master_transfers(transfer_status);
+    `);
+
+    // Transfer status and tracking columns on applicants table
+    try { this.db.exec("ALTER TABLE applicants ADD COLUMN transfer_status TEXT DEFAULT 'Not Transferred';"); } catch {}
+    try { this.db.exec("ALTER TABLE applicants ADD COLUMN transferred_at TEXT;"); } catch {}
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_transfer_status ON applicants(transfer_status);"); } catch {}
+
+    // Master application enhancements for technology analytics & traceability (Prompt Section 6 & 16)
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN technology TEXT;"); } catch {}
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN source_batch_id TEXT;"); } catch {}
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN screening_applicant_id TEXT;"); } catch {}
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN transfer_id TEXT;"); } catch {}
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_ma_tech ON master_applications(technology);"); } catch {}
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_ma_screening_applicant ON master_applications(screening_applicant_id);"); } catch {}
+
+    // Imports enhancements for re-import protection & transfer statistics (Prompt Section 15)
+    try { this.db.exec("ALTER TABLE imports ADD COLUMN file_hash TEXT;"); } catch {}
+    try { this.db.exec("ALTER TABLE imports ADD COLUMN content_fingerprint TEXT;"); } catch {}
+    try { this.db.exec("ALTER TABLE imports ADD COLUMN transferred_count INTEGER DEFAULT 0;"); } catch {}
 
     // Create Jobs table and Recruiters table for strict company-scoped operations
     this.db.exec(`
@@ -1978,10 +2019,8 @@ export class DatabaseService {
 
     this.db.exec('BEGIN TRANSACTION');
     try {
-      // 1. Delete application-to-master links for this company
-      this.db.prepare('DELETE FROM master_applications WHERE company = ?').run(company);
-
-      // 2. Delete all applicant records for this company
+      // 1. Delete all applicant records for this company in screening workspace
+      // NOTE: Master candidate database (master_people & master_applications) are strictly preserved!
       this.db.prepare('DELETE FROM applicants WHERE company = ?').run(company);
 
       // 3. Delete import files belonging to imports of this company
@@ -2471,6 +2510,8 @@ export class DatabaseService {
       linkError: r.link_error || null,
       reviewDecision: r.review_decision || null,
       reviewNotes: r.review_notes || null,
+      transferStatus: r.transfer_status || null,
+      transferredAt: r.transferred_at || null,
     };
   }
 
@@ -3591,6 +3632,651 @@ export class DatabaseService {
     }
 
     return { promotedCount, linkedCount, needsReviewCount, incompleteCount, errors };
+  }
+
+  /**
+   * Phase 2: Controlled, Idempotent Transfer of Final Approved PASSED Records to Master DB
+   * Meets all requirements of Master Project Prompt Section 2 (Company Isolation),
+   * Section 5 (Controlled Integration, Steps 1-5), and Section 7 (Smart Duplicate Intelligence).
+   */
+  transferPassedApplicationsToMaster(
+    company: 'AaraTech' | 'ClinisolTech',
+    options: {
+      batchId?: string;
+      applicantIds?: string[];
+      transferredBy?: string;
+    } = {}
+  ): {
+    success: boolean;
+    company: 'AaraTech' | 'ClinisolTech';
+    totalEligiblePassed: number;
+    transferredCount: number;
+    newCandidatesCount: number;
+    existingCandidatesCount: number;
+    newApplicationsCount: number;
+    skippedDuplicatesCount: number;
+    possibleMatchesCount: number;
+    errorsCount: number;
+    batchId?: string;
+    message: string;
+    transfers: Array<{
+      applicantId: string;
+      applicantName: string;
+      jobTitle: string;
+      personId: string;
+      applicationId: string;
+      status: 'SUCCESS' | 'SKIPPED_EXISTING' | 'FAILED' | 'POSSIBLE_MATCH';
+      classification: string;
+      reason?: string;
+    }>;
+  } {
+    if (company !== 'AaraTech' && company !== 'ClinisolTech') {
+      throw new Error(`Invalid company scope: '${company}'. Must be 'AaraTech' or 'ClinisolTech'.`);
+    }
+
+    const { batchId, applicantIds, transferredBy = 'Recruiter Admin' } = options;
+
+    // Build query: ONLY approved PASS records from the selected company
+    const conditions: string[] = ['a.company = ?', "a.effective_result = 'PASS'"];
+    const params: any[] = [company];
+
+    if (batchId && batchId !== 'ALL') {
+      conditions.push('(a.import_id = ? OR a.batch_id = ?)');
+      params.push(batchId, batchId);
+    }
+
+    if (applicantIds && applicantIds.length > 0) {
+      const placeholders = applicantIds.map(() => '?').join(',');
+      conditions.push(`a.id IN (${placeholders})`);
+      params.push(...applicantIds);
+    }
+
+    const query = `
+      SELECT a.* 
+      FROM applicants a
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY a.created_at ASC, a.id ASC
+    `;
+
+    const eligiblePassed = this.db.prepare(query).all(...params) as any[];
+
+    if (eligiblePassed.length === 0) {
+      return {
+        success: true,
+        company,
+        totalEligiblePassed: 0,
+        transferredCount: 0,
+        newCandidatesCount: 0,
+        existingCandidatesCount: 0,
+        newApplicationsCount: 0,
+        skippedDuplicatesCount: 0,
+        possibleMatchesCount: 0,
+        errorsCount: 0,
+        batchId,
+        message: 'No eligible passed applications found for transfer in the selected scope.',
+        transfers: [],
+      };
+    }
+
+    // Pre-load company-isolated master records
+    const people = this.db.prepare('SELECT * FROM master_people WHERE company = ?').all(company) as any[];
+    const emails = this.db.prepare(`
+      SELECT e.* FROM master_person_emails e
+      JOIN master_people p ON p.id = e.person_id
+      WHERE p.company = ?
+    `).all(company) as any[];
+    const phones = this.db.prepare(`
+      SELECT ph.* FROM master_person_phones ph
+      JOIN master_people p ON p.id = ph.person_id
+      WHERE p.company = ?
+    `).all(company) as any[];
+    const apps = this.db.prepare('SELECT * FROM master_applications WHERE company = ?').all(company) as any[];
+    const transfersList = this.db.prepare('SELECT * FROM master_transfers WHERE company = ?').all(company) as any[];
+
+    // In-memory indexing for fast company-isolated lookup
+    const personById = new Map<string, any>();
+    const personByCode = new Map<string, any>();
+    const emailToPerson = new Map<string, any>();
+    const phoneNameToPerson = new Map<string, any>();
+    const nameToPeople = new Map<string, any[]>();
+    const appsByPersonId = new Map<string, any[]>();
+    const successfulTransfersByAppId = new Set<string>();
+
+    for (const t of transfersList) {
+      if (t.transfer_status === 'SUCCESS' && t.screening_applicant_id) {
+        successfulTransfersByAppId.add(t.screening_applicant_id);
+      }
+    }
+
+    for (const p of people) {
+      personById.set(p.id, p);
+      personByCode.set(p.person_id, p);
+      const nm = (p.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      if (nm) {
+        const list = nameToPeople.get(nm) || [];
+        list.push(p);
+        nameToPeople.set(nm, list);
+      }
+      if (p.primary_email) {
+        emailToPerson.set(p.primary_email.trim().toLowerCase(), p);
+      }
+      if (p.primary_phone && nm) {
+        const cPh = p.primary_phone.replace(/\D/g, '').slice(-10);
+        if (cPh.length >= 7) phoneNameToPerson.set(`${cPh}:::${nm}`, p);
+      }
+    }
+
+    for (const e of emails) {
+      const p = personById.get(e.person_id);
+      const nEmail = (e.normalized_email || e.email || '').trim().toLowerCase();
+      if (p && nEmail) emailToPerson.set(nEmail, p);
+    }
+
+    for (const ph of phones) {
+      const p = personById.get(ph.person_id);
+      const cPh = (ph.phone_normalized || ph.phone_original || '').replace(/\D/g, '').slice(-10);
+      if (p && cPh.length >= 7) {
+        const nm = (p.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        if (nm) phoneNameToPerson.set(`${cPh}:::${nm}`, p);
+      }
+    }
+
+    for (const app of apps) {
+      const list = appsByPersonId.get(app.person_id) || [];
+      list.push(app);
+      appsByPersonId.set(app.person_id, list);
+    }
+
+    // Sequence calculation for new person IDs
+    let maxSeq = 0;
+    for (const p of people) {
+      const match = (p.person_id || '').match(/P-(\d+)/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxSeq) maxSeq = n;
+      }
+    }
+    const globalMaxRow = this.db.prepare("SELECT MAX(CAST(substr(person_id, 3) AS INTEGER)) as max_n FROM master_people WHERE person_id LIKE 'P-%'").get() as any;
+    if (globalMaxRow && globalMaxRow.max_n && globalMaxRow.max_n > maxSeq) {
+      maxSeq = globalMaxRow.max_n;
+    }
+    let nextSeq = maxSeq + 1;
+
+    // Prepared statements
+    const insertPersonStmt = this.db.prepare(`
+      INSERT INTO master_people (
+        id, person_id, first_name, last_name, full_name, gender,
+        primary_email, secondary_email, primary_phone, secondary_phone,
+        location, zip_code, headline, current_title, current_company,
+        linkedin_url, current_status, current_owner, company,
+        green_card, h1b_status, created_at, updated_at, last_activity_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertEmailStmt = this.db.prepare(`
+      INSERT INTO master_person_emails (
+        id, person_id, email, normalized_email, is_primary, source, first_seen_at, last_seen_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertPhoneStmt = this.db.prepare(`
+      INSERT INTO master_person_phones (
+        id, person_id, phone_original, phone_normalized, is_primary, source, first_seen_at, last_seen_at, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertAppStmt = this.db.prepare(`
+      INSERT INTO master_applications (
+        id, person_id, applicant_id, company, job_id, job_title, technology,
+        date_applied, current_stage, effective_result, source_file, source_batch_id,
+        screening_applicant_id, transfer_id, resume_link, green_card, h1b_status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertAssignmentStmt = this.db.prepare(`
+      INSERT INTO master_recruiter_assignments (
+        id, person_id, recruiter_name, assigned_date, status, created_at, created_by, application_id
+      ) VALUES (?, ?, ?, ?, 'Current', ?, ?, ?)
+    `);
+
+    const insertTransferStmt = this.db.prepare(`
+      INSERT INTO master_transfers (
+        id, screening_applicant_id, batch_id, company, person_id, application_id,
+        transfer_status, duplicate_check_result, transferred_at, transferred_by, error_message
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const updateApplicantStmt = this.db.prepare(`
+      UPDATE applicants
+      SET master_person_id = ?,
+          transfer_status = 'Transferred',
+          transferred_at = ?,
+          link_status = 'Linked',
+          link_error = NULL
+      WHERE id = ?
+    `);
+
+    const markApplicantSkippedStmt = this.db.prepare(`
+      UPDATE applicants
+      SET transfer_status = ?,
+          transferred_at = ?,
+          link_error = ?
+      WHERE id = ?
+    `);
+
+    const insertPossibleMatchStmt = this.db.prepare(`
+      INSERT INTO master_possible_matches (
+        id, match_code, candidate_a_id, candidate_b_id, match_reason, company, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'pending', datetime('now'))
+    `);
+
+    const transferResults: Array<{
+      applicantId: string;
+      applicantName: string;
+      jobTitle: string;
+      personId: string;
+      applicationId: string;
+      status: 'SUCCESS' | 'SKIPPED_EXISTING' | 'FAILED' | 'POSSIBLE_MATCH';
+      classification: string;
+      reason?: string;
+    }> = [];
+
+    let transferredCount = 0;
+    let newCandidatesCount = 0;
+    let existingCandidatesCount = 0;
+    let newApplicationsCount = 0;
+    let skippedDuplicatesCount = 0;
+    let possibleMatchesCount = 0;
+    let errorsCount = 0;
+
+    const now = new Date().toISOString();
+
+    this.db.exec('BEGIN TRANSACTION');
+    try {
+      for (const a of eligiblePassed) {
+        const appBatchId = a.import_id || a.batch_id || batchId || 'BATCH-UNKNOWN';
+        const rawEmail = (a.email || '').trim().toLowerCase();
+        const hasEmail = Boolean(rawEmail && rawEmail.includes('@') && !['n/a', 'none', 'null', 'undefined'].includes(rawEmail));
+        const rawPhone = (a.phone || '').trim();
+        const cleanPh = rawPhone.replace(/\D/g, '').slice(-10);
+        const hasPhone = cleanPh.length >= 7;
+
+        const fullName = (a.full_name || `${a.first_name || ''} ${a.last_name || ''}`).trim();
+        const normName = fullName.toLowerCase().replace(/\s+/g, ' ');
+        const jobRole = (a.job_title || a.normalized_role || 'General Applicant').trim();
+        const technology = a.normalized_role || normalizeJobRole(jobRole);
+        const appDate = a.date_applied || a.application_date || a.created_at?.split('T')[0] || now.split('T')[0];
+
+        // 1. Idempotency Check: Was this exact screening applicant already transferred successfully?
+        if (successfulTransfersByAppId.has(a.id)) {
+          skippedDuplicatesCount++;
+          const tId = `mt-${crypto.randomUUID()}`;
+          insertTransferStmt.run(
+            tId, a.id, appBatchId, company, a.master_person_id || null, null,
+            'SKIPPED_EXISTING', 'ACCIDENTAL REIMPORT', now, transferredBy,
+            'Applicant already previously transferred (idempotency guard).'
+          );
+          markApplicantSkippedStmt.run('Skipped (Already Transferred)', now, 'Already transferred', a.id);
+          transferResults.push({
+            applicantId: a.id,
+            applicantName: fullName,
+            jobTitle: jobRole,
+            personId: a.master_person_id || '',
+            applicationId: '',
+            status: 'SKIPPED_EXISTING',
+            classification: 'ACCIDENTAL REIMPORT',
+            reason: 'Applicant was already transferred in a previous run.',
+          });
+          continue;
+        }
+
+        // 2. Candidate Matching within Company Context (Section 7)
+        let matchedPerson: any = null;
+
+        if (a.master_person_id && personByCode.has(a.master_person_id)) {
+          matchedPerson = personByCode.get(a.master_person_id);
+        }
+
+        if (!matchedPerson && hasEmail && emailToPerson.has(rawEmail)) {
+          matchedPerson = emailToPerson.get(rawEmail);
+        }
+
+        if (!matchedPerson && hasPhone && normName && phoneNameToPerson.has(`${cleanPh}:::${normName}`)) {
+          matchedPerson = phoneNameToPerson.get(`${cleanPh}:::${normName}`);
+        }
+
+        // Possible match check: name matches but email and phone differ
+        if (!matchedPerson && normName && nameToPeople.has(normName)) {
+          const candCandidates = nameToPeople.get(normName)!;
+          for (const candA of candCandidates) {
+            possibleMatchesCount++;
+            const matchCode = `PM-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+            insertPossibleMatchStmt.run(
+              `pm-${crypto.randomUUID()}`,
+              matchCode,
+              candA.id,
+              a.id,
+              `Identical name '${fullName}' in ${company} with different contact credentials. Requires human recruiter review.`,
+              company
+            );
+          }
+        }
+
+        // 3. Process Existing Candidate vs New Candidate
+        if (matchedPerson) {
+          // EXISTING CANDIDATE
+          existingCandidatesCount++;
+
+          // Check if candidate already has an application for this technology/role and date/source
+          const personApps = appsByPersonId.get(matchedPerson.id) || [];
+          const isSameApp = personApps.some(existingApp => {
+            if (existingApp.screening_applicant_id && existingApp.screening_applicant_id === a.id) return true;
+            // If same job requisition code (e.g. CT-001) and same applied date
+            if (existingApp.job_id && a.job_id && existingApp.job_id === a.job_id && existingApp.date_applied === appDate) return true;
+            // If same specific job title and same applied date and same source file
+            if (existingApp.job_title && jobRole &&
+                existingApp.job_title.trim().toLowerCase() === jobRole.toLowerCase() &&
+                existingApp.date_applied === appDate &&
+                existingApp.source_file === a.source_file) {
+              return true;
+            }
+            return false;
+          });
+
+          if (isSameApp) {
+            // EXISTING CANDIDATE + EXISTING APPLICATION (Accidental re-import of same role)
+            skippedDuplicatesCount++;
+            const tId = `mt-${crypto.randomUUID()}`;
+            insertTransferStmt.run(
+              tId, a.id, appBatchId, company, matchedPerson.id, null,
+              'SKIPPED_EXISTING', 'EXISTING CANDIDATE + EXISTING APPLICATION', now, transferredBy,
+              'Duplicate application for same job role and date already exists for candidate.'
+            );
+            markApplicantSkippedStmt.run('Skipped (Duplicate Application)', now, 'Existing candidate application duplicate', a.id);
+            transferResults.push({
+              applicantId: a.id,
+              applicantName: fullName,
+              jobTitle: jobRole,
+              personId: matchedPerson.person_id,
+              applicationId: '',
+              status: 'SKIPPED_EXISTING',
+              classification: 'EXISTING CANDIDATE + EXISTING APPLICATION',
+              reason: 'Application already on record for candidate.',
+            });
+          } else {
+            // EXISTING CANDIDATE + NEW APPLICATION (Genuine repeat / multi-technology application)
+            const maId = `ma-${crypto.randomUUID()}`;
+            const tId = `mt-${crypto.randomUUID()}`;
+
+            insertAppStmt.run(
+              maId,
+              matchedPerson.id,
+              a.id,
+              company,
+              a.job_id || null,
+              jobRole,
+              technology,
+              appDate,
+              'Passed',
+              'PASS',
+              a.source_file || null,
+              appBatchId,
+              a.id,
+              tId,
+              a.profile_url || null,
+              a.green_card_answer || 'Yes',
+              'No',
+              now
+            );
+
+            // Enrich contact details if new email or phone supplied
+            if (hasEmail && !emailToPerson.has(rawEmail)) {
+              insertEmailStmt.run(`mpe-${crypto.randomUUID()}`, matchedPerson.id, rawEmail, rawEmail, 0, 'application_transfer', now, now, now);
+              emailToPerson.set(rawEmail, matchedPerson);
+            }
+            if (hasPhone && normName && !phoneNameToPerson.has(`${cleanPh}:::${normName}`)) {
+              insertPhoneStmt.run(`mpp-${crypto.randomUUID()}`, matchedPerson.id, rawPhone, cleanPh, 0, 'application_transfer', now, now, now);
+              phoneNameToPerson.set(`${cleanPh}:::${normName}`, matchedPerson);
+            }
+
+            // Record assignment if recruiter assigned
+            if (a.assigned_recruiter && a.assigned_recruiter !== 'Unassigned') {
+              insertAssignmentStmt.run(`mra-${crypto.randomUUID()}`, matchedPerson.id, a.assigned_recruiter, appDate, now, transferredBy, maId);
+            }
+
+            // Record Transfer Audit
+            insertTransferStmt.run(
+              tId, a.id, appBatchId, company, matchedPerson.id, maId,
+              'SUCCESS', 'EXISTING CANDIDATE + NEW APPLICATION', now, transferredBy, null
+            );
+
+            updateApplicantStmt.run(matchedPerson.person_id, now, a.id);
+            successfulTransfersByAppId.add(a.id);
+
+            personApps.push({
+              id: maId,
+              job_id: a.job_id,
+              job_title: jobRole,
+              technology,
+              date_applied: appDate,
+              screening_applicant_id: a.id,
+              source_file: a.source_file,
+            });
+            appsByPersonId.set(matchedPerson.id, personApps);
+
+            transferredCount++;
+            newApplicationsCount++;
+
+            transferResults.push({
+              applicantId: a.id,
+              applicantName: fullName,
+              jobTitle: jobRole,
+              personId: matchedPerson.person_id,
+              applicationId: maId,
+              status: 'SUCCESS',
+              classification: 'EXISTING CANDIDATE + NEW APPLICATION',
+            });
+          }
+        } else {
+          // NEW CANDIDATE + NEW APPLICATION
+          const personUuid = `p-${crypto.randomUUID()}`;
+          const personCode = `P-${String(nextSeq++).padStart(6, '0')}`;
+          const maId = `ma-${crypto.randomUUID()}`;
+          const tId = `mt-${crypto.randomUUID()}`;
+
+          insertPersonStmt.run(
+            personUuid,
+            personCode,
+            a.first_name || '',
+            a.last_name || '',
+            fullName,
+            a.gender || 'Unspecified',
+            hasEmail ? rawEmail : null,
+            null, // secondary email
+            hasPhone ? cleanPh : null,
+            null, // secondary phone
+            a.location || null,
+            a.zip_code || null,
+            a.headline || null,
+            a.current_title || jobRole,
+            company,
+            a.profile_url || null,
+            'New',
+            a.assigned_recruiter || 'Unassigned',
+            company,
+            a.green_card_answer || 'Yes',
+            'No', // h1b_status defaults to No
+            now,
+            now,
+            now
+          );
+
+          if (hasEmail) {
+            insertEmailStmt.run(`mpe-${crypto.randomUUID()}`, personUuid, rawEmail, rawEmail, 1, 'initial_transfer', now, now, now);
+          }
+          if (hasPhone) {
+            insertPhoneStmt.run(`mpp-${crypto.randomUUID()}`, personUuid, rawPhone, cleanPh, 1, 'initial_transfer', now, now, now);
+          }
+
+          insertAppStmt.run(
+            maId,
+            personUuid,
+            a.id,
+            company,
+            a.job_id || null,
+            jobRole,
+            technology,
+            appDate,
+            'Passed',
+            'PASS',
+            a.source_file || null,
+            appBatchId,
+            a.id,
+            tId,
+            a.profile_url || null,
+            a.green_card_answer || 'Yes',
+            'No',
+            now
+          );
+
+          if (a.assigned_recruiter && a.assigned_recruiter !== 'Unassigned') {
+            insertAssignmentStmt.run(`mra-${crypto.randomUUID()}`, personUuid, a.assigned_recruiter, appDate, now, transferredBy, maId);
+          }
+
+          insertTransferStmt.run(
+            tId, a.id, appBatchId, company, personUuid, maId,
+            'SUCCESS', 'NEW CANDIDATE + NEW APPLICATION', now, transferredBy, null
+          );
+
+          updateApplicantStmt.run(personCode, now, a.id);
+          successfulTransfersByAppId.add(a.id);
+
+          const newPersonObj = {
+            id: personUuid,
+            person_id: personCode,
+            full_name: fullName,
+            company,
+            primary_email: hasEmail ? rawEmail : null,
+            primary_phone: hasPhone ? cleanPh : null,
+          };
+
+          personById.set(personUuid, newPersonObj);
+          personByCode.set(personCode, newPersonObj);
+          if (hasEmail) emailToPerson.set(rawEmail, newPersonObj);
+          if (hasPhone && normName) phoneNameToPerson.set(`${cleanPh}:::${normName}`, newPersonObj);
+          if (normName) {
+            const list = nameToPeople.get(normName) || [];
+            list.push(newPersonObj);
+            nameToPeople.set(normName, list);
+          }
+          appsByPersonId.set(personUuid, [{
+            id: maId,
+            job_id: a.job_id,
+            job_title: jobRole,
+            technology,
+            date_applied: appDate,
+            screening_applicant_id: a.id,
+            source_file: a.source_file,
+          }]);
+
+          transferredCount++;
+          newCandidatesCount++;
+          newApplicationsCount++;
+
+          transferResults.push({
+            applicantId: a.id,
+            applicantName: fullName,
+            jobTitle: jobRole,
+            personId: personCode,
+            applicationId: maId,
+            status: 'SUCCESS',
+            classification: 'NEW CANDIDATE + NEW APPLICATION',
+          });
+        }
+      }
+
+      this.db.exec('COMMIT');
+    } catch (err: any) {
+      this.db.exec('ROLLBACK');
+      console.error('[DatabaseService] transferPassedApplicationsToMaster error:', err);
+      throw err;
+    }
+
+    // Add comprehensive audit log
+    this.addAuditLog({
+      id: `audit-${Date.now()}`,
+      timestamp: now,
+      user: transferredBy,
+      action: 'Transfer Passed Applications',
+      reason: `User executed Send Passed Applications to Master Database for ${company}.`,
+      details: `Evaluated ${eligiblePassed.length} passed records. Transferred: ${transferredCount} (${newCandidatesCount} new candidate profiles, ${newApplicationsCount - newCandidatesCount} repeat applications). Skipped ${skippedDuplicatesCount} duplicates. Flagged ${possibleMatchesCount} possible matches.`,
+    });
+
+    return {
+      success: true,
+      company,
+      totalEligiblePassed: eligiblePassed.length,
+      transferredCount,
+      newCandidatesCount,
+      existingCandidatesCount,
+      newApplicationsCount,
+      skippedDuplicatesCount,
+      possibleMatchesCount,
+      errorsCount,
+      batchId,
+      message: `Successfully transferred ${transferredCount} passed application(s) to Master Database (${newCandidatesCount} new candidate profiles created, ${newApplicationsCount - newCandidatesCount} repeat applications added). Skipped ${skippedDuplicatesCount} duplicate application(s).`,
+      transfers: transferResults,
+    };
+  }
+
+  /**
+   * Returns live transfer status metrics for a given batch or company
+   */
+  getTransferStatus(company: 'AaraTech' | 'ClinisolTech', batchId?: string): {
+    company: 'AaraTech' | 'ClinisolTech';
+    batchId?: string;
+    totalApplicants: number;
+    passedCount: number;
+    manualReviewCount: number;
+    failedCount: number;
+    transferredCount: number;
+    pendingTransferCount: number;
+    skippedCount: number;
+  } {
+    const conditions: string[] = ['company = ?'];
+    const params: any[] = [company];
+
+    if (batchId && batchId !== 'ALL') {
+      conditions.push('(import_id = ? OR batch_id = ?)');
+      params.push(batchId, batchId);
+    }
+
+    const where = conditions.join(' AND ');
+
+    const row = this.db.prepare(`
+      SELECT 
+        COUNT(*) as total_count,
+        SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as passed_count,
+        SUM(CASE WHEN effective_result = 'MANUAL_REVIEW' THEN 1 ELSE 0 END) as manual_review_count,
+        SUM(CASE WHEN effective_result = 'FAIL' THEN 1 ELSE 0 END) as failed_count,
+        SUM(CASE WHEN effective_result = 'PASS' AND transfer_status = 'Transferred' THEN 1 ELSE 0 END) as transferred_count,
+        SUM(CASE WHEN effective_result = 'PASS' AND (transfer_status IS NULL OR transfer_status = 'Not Transferred') THEN 1 ELSE 0 END) as pending_count,
+        SUM(CASE WHEN transfer_status LIKE 'Skipped%' THEN 1 ELSE 0 END) as skipped_count
+      FROM applicants
+      WHERE ${where}
+    `).get(...params) as any;
+
+    return {
+      company,
+      batchId,
+      totalApplicants: Number(row.total_count) || 0,
+      passedCount: Number(row.passed_count) || 0,
+      manualReviewCount: Number(row.manual_review_count) || 0,
+      failedCount: Number(row.failed_count) || 0,
+      transferredCount: Number(row.transferred_count) || 0,
+      pendingTransferCount: Number(row.pending_count) || 0,
+      skippedCount: Number(row.skipped_count) || 0,
+    };
   }
 
   getMasterCandidates(params: string | {

@@ -32,6 +32,9 @@ import {
   ZoomOut,
   Sparkles,
   Edit3,
+  Database,
+  ArrowRight,
+  UserPlus,
 } from 'lucide-react';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { Applicant, ImportRecord, Recruiter, NameMatchCategory } from '../../types';
@@ -51,7 +54,7 @@ import {
 import { CompanyName } from '../../types/masterDatabase';
 
 export const ApplicationFilterWorkspaceView: React.FC = () => {
-  const { activeCompany, setActiveCompany, isDualCompany } = useWorkspace();
+  const { user, activeCompany, setActiveCompany, isDualCompany } = useWorkspace();
 
   // Read initial navigation state from URL parameters + session backup
   const initialNavState = useMemo(() => {
@@ -136,6 +139,23 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
     preservedJobSlots: number;
   } | null>(null);
   const [loadingClearSummary, setLoadingClearSummary] = useState<boolean>(false);
+
+  // Phase 2: Send Passed Applications to Master Database State
+  const [isTransferring, setIsTransferring] = useState<boolean>(false);
+  const [transferModalSummary, setTransferModalSummary] = useState<{
+    open: boolean;
+    result?: {
+      totalEligiblePassed: number;
+      transferredCount: number;
+      newCandidatesCount: number;
+      existingCandidatesCount: number;
+      newApplicationsCount: number;
+      skippedDuplicatesCount: number;
+      possibleMatchesCount: number;
+      message: string;
+      transfers: any[];
+    };
+  }>({ open: false });
 
   // File Upload State
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -726,6 +746,29 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
       setTimeout(() => setCopySuccessMessage(null), 3000);
     } catch (err: any) {
       alert(`Copy failed: ${err.message}`);
+    }
+  };
+
+  // Phase 2: Send Passed Applications to Master Database Handler (Prompt Section 5)
+  const handleSendPassedToMaster = async () => {
+    setIsTransferring(true);
+    try {
+      const idsToTransfer = selectedApplicantIds.length > 0 ? selectedApplicantIds : undefined;
+      const res = await api.transferPassedToMaster({
+        company: activeCompany,
+        batchId: viewMode === 'working_batch' && activeBatchId && activeBatchId !== 'ALL' ? activeBatchId : undefined,
+        applicantIds: idsToTransfer,
+        transferredBy: user?.name || 'Recruiter Admin',
+      });
+      setTransferModalSummary({
+        open: true,
+        result: res,
+      });
+      await refreshAllWorkspaceData();
+    } catch (err: any) {
+      alert(`Transfer failed: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsTransferring(false);
     }
   };
 
@@ -2107,6 +2150,28 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
           </div>
 
           <div className="flex items-center flex-wrap gap-2">
+            {/* Phase 2: Explicit Action to Transfer Approved Passed Applications to Master Candidate Database (Prompt Section 5 Step 3) */}
+            <button
+              type="button"
+              onClick={handleSendPassedToMaster}
+              disabled={isTransferring}
+              className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold !text-xs !py-1.5 px-3 rounded-lg shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              title="Transfer all final approved PASSED applications in this batch into the permanent Master Candidate Database (deduplicates against existing candidates)"
+            >
+              {isTransferring ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Database className="w-3.5 h-3.5" />
+              )}
+              <span>
+                {isTransferring
+                  ? 'Transferring...'
+                  : selectedApplicantIds.length > 0
+                  ? `Send Selected Passed (${selectedApplicantIds.length}) to Master DB`
+                  : 'Send Passed Applications to Master DB'}
+              </span>
+            </button>
+
             {/* Primary Action: Copy for Google Sheets (Verification & Match TSV - Section 6.3 8-Column Format) */}
             <button
               type="button"
@@ -2234,6 +2299,14 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
                               title={`Duplicate detected: ${a.duplicateReason || 'Already in master DB'}`}
                             >
                               DUP
+                            </span>
+                          )}
+                          {a.transferStatus === 'Transferred' && (
+                            <span
+                              className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              title={`Transferred to Master Candidate Database${a.masterPersonId ? ` (${a.masterPersonId})` : ''}`}
+                            >
+                              In Master DB
                             </span>
                           )}
                         </div>
@@ -2621,6 +2694,123 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
               >
                 {isSavingJobSlot ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                 <span>Save New Title</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Phase 2: Transfer Passed Applications Result Modal */}
+      {transferModalSummary.open && transferModalSummary.result && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6 space-y-4 animate-in fade-in zoom-in-95 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-base">
+                <Database className="w-5 h-5 text-emerald-600" />
+                <span>Passed Applications Transfer Completed</span>
+                <span className="text-xs px-2 py-0.5 rounded font-mono font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                  {activeCompany}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTransferModalSummary({ open: false })}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              {transferModalSummary.result.message}
+            </p>
+
+            {/* Metrics Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-center">
+                <div className="text-[10px] font-semibold text-slate-500 uppercase">Evaluated</div>
+                <div className="text-xl font-bold text-slate-800 mt-0.5">
+                  {transferModalSummary.result.totalEligiblePassed}
+                </div>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
+                <div className="text-[10px] font-semibold text-emerald-700 uppercase">Transferred</div>
+                <div className="text-xl font-bold text-emerald-700 mt-0.5">
+                  {transferModalSummary.result.transferredCount}
+                </div>
+              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+                <div className="text-[10px] font-semibold text-blue-700 uppercase">New Candidates</div>
+                <div className="text-xl font-bold text-blue-700 mt-0.5">
+                  {transferModalSummary.result.newCandidatesCount}
+                </div>
+              </div>
+              <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 text-center">
+                <div className="text-[10px] font-semibold text-purple-700 uppercase">Repeat Apps</div>
+                <div className="text-xl font-bold text-purple-700 mt-0.5">
+                  {Math.max(0, transferModalSummary.result.newApplicationsCount - transferModalSummary.result.newCandidatesCount)}
+                </div>
+              </div>
+            </div>
+
+            {/* Duplicates and Possible Matches Notice */}
+            {(transferModalSummary.result.skippedDuplicatesCount > 0 || transferModalSummary.result.possibleMatchesCount > 0) && (
+              <div className="flex items-center justify-between text-xs bg-amber-50 text-amber-800 border border-amber-200 p-2.5 rounded-lg">
+                <span>
+                  🛡️ <strong>Duplicate Intelligence:</strong> {transferModalSummary.result.skippedDuplicatesCount} identical application occurrence(s) skipped to prevent accidental reimports.
+                </span>
+                {transferModalSummary.result.possibleMatchesCount > 0 && (
+                  <span className="font-semibold text-purple-700">
+                    {transferModalSummary.result.possibleMatchesCount} possible match(es) queued for human review.
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Candidate Breakdown List */}
+            <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg min-h-[140px] max-h-[260px]">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 text-slate-500 font-semibold sticky top-0 border-b border-slate-200">
+                  <tr>
+                    <th className="py-2 px-3">Candidate</th>
+                    <th className="py-2 px-3">Role / Technology</th>
+                    <th className="py-2 px-3">Person ID</th>
+                    <th className="py-2 px-3">Classification</th>
+                    <th className="py-2 px-3 text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {transferModalSummary.result.transfers.map((t, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50">
+                      <td className="py-2 px-3 font-semibold text-slate-800">{t.applicantName}</td>
+                      <td className="py-2 px-3 text-slate-600">{t.jobTitle}</td>
+                      <td className="py-2 px-3 font-mono font-bold text-blue-600">{t.personId || '-'}</td>
+                      <td className="py-2 px-3 text-[11px] text-slate-500">{t.classification}</td>
+                      <td className="py-2 px-3 text-right">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          t.status === 'SUCCESS'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-amber-50 text-amber-700 border border-amber-200'
+                        }`}>
+                          {t.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+              <span className="text-[11px] text-slate-400">
+                Company Isolation Active: Transfers strictly committed to {activeCompany} master database.
+              </span>
+              <button
+                type="button"
+                onClick={() => setTransferModalSummary({ open: false })}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-lg cursor-pointer transition-colors"
+              >
+                Close & Return
               </button>
             </div>
           </div>

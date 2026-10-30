@@ -54,3 +54,4 @@
 - [x] Database snapshot saved as `linkedin_screening.db.DM-MSDB-V1.backup`.
 - [x] Candidate profile view verified for records with multiple feedback and assignment entries.
 - [x] Spreadsheet import preview and execution verified with multi-column splitting.
+

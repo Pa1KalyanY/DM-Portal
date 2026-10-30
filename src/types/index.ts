@@ -95,6 +95,8 @@ export interface Applicant {
   linkError?: string | null;
   reviewDecision?: 'APPROVED' | 'REJECTED' | 'PENDING' | null;
   reviewNotes?: string | null;
+  transferStatus?: string | null;
+  transferredAt?: string | null;
 }
 
 export interface ImportFileRecord {
