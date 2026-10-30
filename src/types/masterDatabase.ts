@@ -184,10 +184,12 @@ export interface RecruiterContact {
   outcome_status?: string | null; // Call status / outcome (e.g. Connected, VM, No Answer)
   feedback_1?: string | null;
   feedback_2?: string | null;
+  additional_feedback?: string | null;
   additional_notes?: string | null;
   notes?: string | null;
   raw_feedback?: string | null;
   next_followup_date?: string | null;
+  next_follow_up?: string | null;
   original_feedback: string; // Verbatim raw feedback
   feedback_label?: string | null;
   column_index?: number | null;

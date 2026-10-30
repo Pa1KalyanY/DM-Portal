@@ -1723,7 +1723,7 @@ app.post('/api/master-candidates/:id/reassign', (req: Request, res: Response): v
 
 app.post('/api/master-candidates/:id/contact-attempt', (req: Request, res: Response): void => {
   try {
-    const { recruiterName, contactMethod, outcome, feedback1, feedback2, notes, contactDate, nextFollowUp, sourceFile, user } = req.body;
+    const { recruiterName, contactMethod, outcome, feedback1, feedback2, additionalFeedback, additional_feedback, notes, contactDate, nextFollowUp, sourceFile, user } = req.body;
     if (!recruiterName) {
       res.status(400).json({ error: 'recruiterName is required' });
       return;
@@ -1736,6 +1736,7 @@ app.post('/api/master-candidates/:id/contact-attempt', (req: Request, res: Respo
         outcome,
         feedback_1: feedback1,
         feedback_2: feedback2,
+        additional_feedback: additionalFeedback || additional_feedback,
         notes,
         contact_date: contactDate,
         next_follow_up: nextFollowUp,

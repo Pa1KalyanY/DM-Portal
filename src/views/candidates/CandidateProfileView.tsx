@@ -1525,15 +1525,60 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                     </div>
                   )}
 
-                  {/* Notes / Verbatim Feedback */}
-                  {contact.notes && !(contact as any).feedback_1 && !(contact as any).feedback_2 && (
-                    <div className="text-xs">
-                      <span className="text-[11px] font-semibold text-slate-500 uppercase">Notes:</span>
-                      <div className="font-mono text-slate-800 bg-white p-2 rounded border border-slate-200 mt-0.5 whitespace-pre-wrap">
-                        {contact.notes}
+                  {/* Additional Feedback Columns (Feedback 3, 4, 5, 6...) */}
+                  {(() => {
+                    const addFb = (contact as any).additional_feedback;
+                    if (!addFb) return null;
+                    try {
+                      const parsed = typeof addFb === 'string' ? JSON.parse(addFb) : addFb;
+                      if (Array.isArray(parsed) && parsed.length > 0) {
+                        return (
+                          <div className="space-y-2">
+                            {parsed.map((item: any, idx: number) => {
+                              const label = item.label || `Feedback ${item.feedbackIndex || idx + 3}`;
+                              const text = item.text || item.value || (typeof item === 'string' ? item : '');
+                              if (!text) return null;
+                              return (
+                                <div key={idx} className="text-xs">
+                                  <span className="text-[11px] font-semibold text-slate-500 uppercase">{label}:</span>
+                                  <div className="font-mono text-slate-800 bg-white p-2 rounded border border-slate-200 mt-0.5 whitespace-pre-wrap">
+                                    {text}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      }
+                    } catch {}
+                    return null;
+                  })()}
+
+                  {/* Notes / Verbatim Feedback (Show if notes exist and have distinct content not already fully shown above) */}
+                  {(() => {
+                    if (!contact.notes) return null;
+                    const notesTrimmed = contact.notes.trim();
+                    const f1 = ((contact as any).feedback_1 || '').trim();
+                    const f2 = ((contact as any).feedback_2 || '').trim();
+                    const hasAddFb = !!(contact as any).additional_feedback;
+
+                    // If additional_feedback already displays all items (which was formed from notesCombined), don't duplicate
+                    if (hasAddFb) return null;
+
+                    // If only f1 or f2 existed and notes is identical to f1, f2, or f1 + f2, don't duplicate
+                    if (notesTrimmed === f1 || notesTrimmed === f2 || notesTrimmed === `${f1}\n${f2}` || notesTrimmed === `${f1} • ${f2}`) {
+                      return null;
+                    }
+
+                    return (
+                      <div className="text-xs">
+                        <span className="text-[11px] font-semibold text-slate-500 uppercase">Notes:</span>
+                        <div className="font-mono text-slate-800 bg-white p-2 rounded border border-slate-200 mt-0.5 whitespace-pre-wrap">
+                          {contact.notes}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                   {/* Next Follow Up */}
                   {(contact as any).next_follow_up && (

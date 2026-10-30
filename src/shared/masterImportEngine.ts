@@ -709,6 +709,24 @@ export const COLUMN_PATTERNS: Record<TargetColumn, string[]> = {
  * - Comments, Remarks, Call Notes, Touchpoint Notes, Screening Notes
  * - Discussion, Disposition, Review, Status Notes, Contact Notes
  */
+// EXPLICIT NON-FEEDBACK HEADERS: Check these first to avoid false positives!
+export const NON_FEEDBACK_EXACT_HEADERS = new Set([
+  'candidate name', 'candidate full name', 'full name', 'first name', 'last name', 'name',
+  'applicant name', 'consultant name', 'person name',
+  'email', 'email address', 'primary email', 'secondary email', 'alt email', 'email id', 'email i d',
+  'phone', 'phone number', 'primary phone', 'secondary phone', 'mobile', 'mobile number', 'contact number',
+  'job title', 'job role', 'role', 'position', 'opening', 'req title', 'ats job id', 'job id', 'req id',
+  'company', 'entity', 'organization', 'client', 'firm',
+  'location', 'city', 'state', 'zip', 'zip code', 'metro', 'address', 'current location', 'candidate location',
+  'preferred location', 'desired location', 'relocation',
+  'date', 'date applied', 'applied date', 'date assigned', 'assigned date', 'submission date',
+  'status', 'candidate status', 'operational status', 'pipeline stage', 'stage', 'current stage',
+  'resume', 'resume link', 'resume url', 'cv', 'cv link',
+  'linkedin', 'linkedin url', 'linkedin profile', 'profile url',
+  'gender', 'sex', 'salutation',
+  'recruiter', 'recruiter name', 'assigned owner', 'owner', 'lead recruiter', 'sourcer'
+]);
+
 export function detectFeedbackHeader(header: string): {
   isFeedback: boolean;
   feedbackIndex: number | null;
@@ -726,25 +744,7 @@ export function detectFeedbackHeader(header: string): {
     .replace(/\s+/g, ' ')
     .trim();
 
-  // EXPLICIT NON-FEEDBACK HEADERS: Check these first to avoid false positives!
-  const nonFeedbackExact = new Set([
-    'candidate name', 'candidate full name', 'full name', 'first name', 'last name', 'name',
-    'applicant name', 'consultant name', 'person name',
-    'email', 'email address', 'primary email', 'secondary email', 'alt email', 'email id', 'email i d',
-    'phone', 'phone number', 'primary phone', 'secondary phone', 'mobile', 'mobile number', 'contact number',
-    'job title', 'job role', 'role', 'position', 'opening', 'req title', 'ats job id', 'job id', 'req id',
-    'company', 'entity', 'organization', 'client', 'firm',
-    'location', 'city', 'state', 'zip', 'zip code', 'metro', 'address', 'current location', 'candidate location',
-    'preferred location', 'desired location', 'relocation',
-    'date', 'date applied', 'applied date', 'date assigned', 'assigned date', 'submission date',
-    'status', 'candidate status', 'operational status', 'pipeline stage', 'stage', 'current stage',
-    'resume', 'resume link', 'resume url', 'cv', 'cv link',
-    'linkedin', 'linkedin url', 'linkedin profile', 'profile url',
-    'gender', 'sex', 'salutation',
-    'recruiter', 'recruiter name', 'assigned owner', 'owner', 'lead recruiter', 'sourcer'
-  ]);
-
-  if (nonFeedbackExact.has(clean)) {
+  if (NON_FEEDBACK_EXACT_HEADERS.has(clean)) {
     return { isFeedback: false, feedbackIndex: null, feedbackLabel: trimmed };
   }
 
@@ -1074,7 +1074,7 @@ export function autoDetectMappings(
       } else if (
         sampleValues.some(v =>
           v.length > 20 ||
-          /(citizen|green card|opt|visa|underage|desi|experience|bachelors|masters|package|\$|per hour|\/hr|call back|not on|he is|she is|interview|assessment|looking|expecting|\blvm\b|left\s*vm|voicemail|jd\s*sent|no\s*answer|\brnr\b|ring\s*no\s*response|not\s*interested|call\s*tomorrow|scheduled|attended|shortlisted|rejected|c2c|w2|\b1099\b|opt\s*ead)/i.test(
+          /(citizen|green card|opt|visa|underage|desi|experience|bachelors|masters|package|\$|per hour|\/hr|call back|not on|he is|she is|interview|assessment|looking|expecting|\blvm\b|left\s*vm|voicemail|jd\s*sent|no\s*answer|\brnr\b|ring\s*no\s*response|not\s*interested|call\s*tomorrow|scheduled|attended|shortlisted|rejected|c2c|w2|\b1099\b|opt\s*ead|\bvm\b|calling|wrong\s*number|busy|hold|employer|split)/i.test(
             v
           )
         )
@@ -1083,6 +1083,18 @@ export function autoDetectMappings(
           bestTarget = 'recruiter_feedback';
           highestScore = 0.90;
           feedbackLabel = header.trim();
+        }
+      } else if (
+        sampleValues.length > 0 &&
+        (!cleanHeader || /^(__empty|column\s*\d+|unnamed)/i.test(cleanHeader) || !NON_FEEDBACK_EXACT_HEADERS.has(cleanHeader))
+      ) {
+        // Any unmapped extra column with text that is not phone, email, date -> Recruiter Feedback / Notes
+        const isNotCoreData = !sampleValues.some(v => isPhoneNumber(v) || v.includes('@') || isDateString(v));
+        if (isNotCoreData && (bestTarget === 'ignore' || highestScore < 0.85)) {
+          bestTarget = 'recruiter_feedback';
+          highestScore = 0.88;
+          feedbackLabel = cleanHeader && !/^(__empty|unnamed)/i.test(cleanHeader) ? header.trim() : `Feedback ${colIdx + 1}`;
+          feedbackIndex = colIdx + 1;
         }
       }
     }
@@ -1890,6 +1902,32 @@ export function convertPastedTextToFile(rawText: string, customName?: string): F
         }
       }
 
+      // Capture ANY and ALL additional unmapped columns with text (e.g. Feedback 3, Feedback 4, Feedback 5, Feedback 6...)
+      const mappedColIndices = new Set(Object.values(headerMapping));
+      let nextFeedbackNum = 3;
+      while (cand[`Feedback ${nextFeedbackNum}`] || headerMapping[`Feedback ${nextFeedbackNum}`] !== undefined) {
+        nextFeedbackNum++;
+      }
+
+      for (let cIdx = 0; cIdx < r.length; cIdx++) {
+        if (mappedColIndices.has(cIdx)) continue;
+        const cellVal = r[cIdx] !== undefined && r[cIdx] !== null ? String(r[cIdx]).trim() : '';
+        if (!cellVal) continue;
+
+        // Check if URL
+        if (cellVal.includes('drive.google.com') || cellVal.includes('/file/d/') || cellVal.includes('docs.google.com')) {
+          if (!cand['Resume Link']) { cand['Resume Link'] = cellVal; continue; }
+        }
+        if (cellVal.includes('linkedin.com/in') || cellVal.includes('linkedin.com')) {
+          if (!cand['LinkedIn Profile']) { cand['LinkedIn Profile'] = cellVal; continue; }
+        }
+
+        // Additional recruiter feedback / call outcome / notes
+        const fbFieldKey = `Feedback ${nextFeedbackNum}`;
+        cand[fbFieldKey] = cellVal;
+        nextFeedbackNum++;
+      }
+
       if (headerMapping['Secondary Email'] !== undefined && r[headerMapping['Secondary Email']]) {
         cand['Secondary Email'] = r[headerMapping['Secondary Email']];
       }
@@ -2573,6 +2611,29 @@ export async function executeImport(
         }
       }
 
+      // Capture ANY additional columns with text (e.g. Feedback 3, Feedback 4, Feedback 5, Feedback 6...)
+      for (const [colName, val] of Object.entries(row)) {
+        if (val === undefined || val === null) continue;
+        const sVal = String(val).trim();
+        if (!sVal) continue;
+        const target = mappingLookup[colName];
+        if (target && target !== 'ignore' && target !== 'recruiter_feedback') continue;
+        if (rowFeedbackItems.some(f => f.sourceColumn === colName)) continue;
+        if (isPhoneNumber(sVal) || sVal.includes('@') || isDateString(sVal)) continue;
+
+        const fbDetect = detectFeedbackHeader(colName);
+        const fbLabel = fbDetect.isFeedback
+          ? fbDetect.feedbackLabel
+          : (colName.startsWith('__EMPTY') || /^column\s*\d+/i.test(colName) ? `Feedback ${rowFeedbackItems.length + 1}` : colName);
+        rowFeedbackItems.push({
+          sourceColumn: colName,
+          feedbackLabel: fbLabel,
+          columnIndex: null,
+          feedbackIndex: fbDetect.feedbackIndex || (rowFeedbackItems.length + 1),
+          text: sVal,
+        });
+      }
+
       rawRecruiterFeedback = rowFeedbackItems.map(f => f.text).join('\n');
 
       for (const [colName, val] of Object.entries(row)) {
@@ -3195,13 +3256,27 @@ export async function executeImport(
         // Section 6: Preserve Recruiter Assignments and Feedback (100% Verbatim & Traceable)
         if (rowFeedbackItems.length > 0) {
           if (!targetPerson.recruiter_contacts) targetPerson.recruiter_contacts = [];
-          const f1 = rowFeedbackItems.find(f => f.feedbackIndex === 1 || f.feedbackLabel.toLowerCase().includes('feedback 1'))?.text || rowFeedbackItems[0]?.text || null;
-          const f2 = rowFeedbackItems.find(f => f.feedbackIndex === 2 || f.feedbackLabel.toLowerCase().includes('feedback 2'))?.text || (rowFeedbackItems.length > 1 ? rowFeedbackItems[1]?.text : null);
-          const primaryNote = f2 || f1 || '';
+          const f1Item = rowFeedbackItems.find(f => f.feedbackIndex === 1 || f.feedbackLabel.toLowerCase().includes('feedback 1')) || rowFeedbackItems[0];
+          const f2Item = rowFeedbackItems.find(f => (f.feedbackIndex === 2 || f.feedbackLabel.toLowerCase().includes('feedback 2')) && f !== f1Item) || (rowFeedbackItems.length > 1 && rowFeedbackItems[1] !== f1Item ? rowFeedbackItems[1] : null);
+
+          const f1 = f1Item?.text || null;
+          const f2 = f2Item?.text || null;
+          const additionalItems = rowFeedbackItems.filter(f => f !== f1Item && f !== f2Item);
+
+          const allTexts = rowFeedbackItems.map(f => f.text).filter(Boolean);
+          const rawFeedbackCombined = allTexts.join(' • ');
+          const notesCombined = rowFeedbackItems.map(f => `${f.feedbackLabel}: ${f.text}`).join('\n');
+          const additionalFeedbackJson = additionalItems.length > 0 ? JSON.stringify(additionalItems.map(f => ({
+            label: f.feedbackLabel,
+            text: f.text,
+            sourceColumn: f.sourceColumn,
+            feedbackIndex: f.feedbackIndex,
+          }))) : null;
+
           const recName = determinedOwner !== 'Unassigned' ? determinedOwner : (rawRecruiterName || 'Recruiter');
 
           const isDup = isDuplicateContact(targetPerson.recruiter_contacts, {
-            text: primaryNote,
+            text: rawFeedbackCombined,
             feedbackLabel: rowFeedbackItems[0]?.feedbackLabel,
             columnIndex: rowFeedbackItems[0]?.columnIndex,
             contactDate,
@@ -3223,13 +3298,14 @@ export async function executeImport(
               outcome: f1 || 'Logged',
               feedback_1: f1,
               feedback_2: f2,
-              original_feedback: primaryNote, // 100% VERBATIM!
-              raw_feedback: [f1, f2].filter(Boolean).join(' • '),
-              notes: primaryNote,
+              additional_feedback: additionalFeedbackJson,
+              original_feedback: rawFeedbackCombined, // 100% VERBATIM!
+              raw_feedback: rawFeedbackCombined,
+              notes: notesCombined,
               feedback_label: rowFeedbackItems[0]?.feedbackLabel,
               column_index: rowFeedbackItems[0]?.columnIndex,
               import_id: importId,
-              source: `Import ${importId} | ${rowFeedbackItems[0]?.feedbackLabel}`,
+              source: `Import ${importId} | ${rowFeedbackItems.map(f => f.feedbackLabel).join(', ')}`,
               source_file: file.name,
               source_row: rowNumber,
               application_unresolved: applicationUncertain,
@@ -3406,9 +3482,23 @@ export async function executeImport(
         createdPerson.applications!.push(newApp);
 
         if (rowFeedbackItems.length > 0) {
-          const f1 = rowFeedbackItems.find(f => f.feedbackIndex === 1 || f.feedbackLabel.toLowerCase().includes('feedback 1'))?.text || rowFeedbackItems[0]?.text || null;
-          const f2 = rowFeedbackItems.find(f => f.feedbackIndex === 2 || f.feedbackLabel.toLowerCase().includes('feedback 2'))?.text || (rowFeedbackItems.length > 1 ? rowFeedbackItems[1]?.text : null);
-          const primaryNote = f2 || f1 || '';
+          const f1Item = rowFeedbackItems.find(f => f.feedbackIndex === 1 || f.feedbackLabel.toLowerCase().includes('feedback 1')) || rowFeedbackItems[0];
+          const f2Item = rowFeedbackItems.find(f => (f.feedbackIndex === 2 || f.feedbackLabel.toLowerCase().includes('feedback 2')) && f !== f1Item) || (rowFeedbackItems.length > 1 && rowFeedbackItems[1] !== f1Item ? rowFeedbackItems[1] : null);
+
+          const f1 = f1Item?.text || null;
+          const f2 = f2Item?.text || null;
+          const additionalItems = rowFeedbackItems.filter(f => f !== f1Item && f !== f2Item);
+
+          const allTexts = rowFeedbackItems.map(f => f.text).filter(Boolean);
+          const rawFeedbackCombined = allTexts.join(' • ');
+          const notesCombined = rowFeedbackItems.map(f => `${f.feedbackLabel}: ${f.text}`).join('\n');
+          const additionalFeedbackJson = additionalItems.length > 0 ? JSON.stringify(additionalItems.map(f => ({
+            label: f.feedbackLabel,
+            text: f.text,
+            sourceColumn: f.sourceColumn,
+            feedbackIndex: f.feedbackIndex,
+          }))) : null;
+
           contactsCreated++;
           createdPerson.recruiter_contacts!.push({
             id: generateUuid(),
@@ -3421,13 +3511,14 @@ export async function executeImport(
             outcome: f1 || 'Logged',
             feedback_1: f1,
             feedback_2: f2,
-            original_feedback: primaryNote, // VERBATIM
-            raw_feedback: [f1, f2].filter(Boolean).join(' • '),
-            notes: primaryNote,
+            additional_feedback: additionalFeedbackJson,
+            original_feedback: rawFeedbackCombined, // VERBATIM
+            raw_feedback: rawFeedbackCombined,
+            notes: notesCombined,
             feedback_label: rowFeedbackItems[0]?.feedbackLabel,
             column_index: rowFeedbackItems[0]?.columnIndex,
             import_id: importId,
-            source: `Import ${importId} | ${rowFeedbackItems[0]?.feedbackLabel}`,
+            source: `Import ${importId} | ${rowFeedbackItems.map(f => f.feedbackLabel).join(', ')}`,
             source_file: file.name,
             source_row: rowNumber,
             created_at: contactDate ? `${contactDate}T12:00:00.000Z` : now,

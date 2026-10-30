@@ -463,6 +463,7 @@ export class DatabaseService {
     try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN outcome TEXT;"); } catch {}
     try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN feedback_1 TEXT;"); } catch {}
     try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN feedback_2 TEXT;"); } catch {}
+    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN additional_feedback TEXT;"); } catch {}
     try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN next_follow_up TEXT;"); } catch {}
     try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN raw_feedback TEXT;"); } catch {}
     try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN source_file TEXT;"); } catch {}
@@ -5149,6 +5150,7 @@ export class DatabaseService {
         outcome: rc.outcome || 'Note Logged',
         feedback_1: rc.feedback_1 || null,
         feedback_2: rc.feedback_2 || null,
+        additional_feedback: rc.additional_feedback || null,
         next_follow_up: rc.next_follow_up || null,
         original_feedback: rc.raw_feedback || rc.notes || '',
         raw_feedback: rc.raw_feedback || rc.notes || '',
@@ -5315,7 +5317,7 @@ export class DatabaseService {
     return this.getMasterCandidateById(person.id);
   }
 
-  addMasterContactAttempt(personId: string, data: { recruiter_name: string; contact_method?: string; outcome?: string; feedback_1?: string; feedback_2?: string; notes?: string; contact_date?: string; next_follow_up?: string; source_file?: string }, user = 'Recruiter Admin'): any | null {
+  addMasterContactAttempt(personId: string, data: { recruiter_name: string; contact_method?: string; outcome?: string; feedback_1?: string; feedback_2?: string; additional_feedback?: string; notes?: string; contact_date?: string; next_follow_up?: string; source_file?: string }, user = 'Recruiter Admin'): any | null {
     const person = this.db.prepare('SELECT id, full_name, person_id, first_confirmed_contacted_by FROM master_people WHERE id = ? OR person_id = ?').get(personId, personId) as any;
     if (!person) return null;
 
@@ -5329,8 +5331,8 @@ export class DatabaseService {
       this.db.prepare(`
         INSERT INTO master_recruiter_contacts (
           id, person_id, recruiter_name, contact_type, notes, contact_date, created_at,
-          contact_method, outcome, feedback_1, feedback_2, next_follow_up, raw_feedback, source_file, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          contact_method, outcome, feedback_1, feedback_2, additional_feedback, next_follow_up, raw_feedback, source_file, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         contactId,
         person.id,
@@ -5343,6 +5345,7 @@ export class DatabaseService {
         data.outcome || 'Contact Logged',
         data.feedback_1 || null,
         data.feedback_2 || null,
+        data.additional_feedback || null,
         data.next_follow_up || null,
         fullNotes,
         data.source_file || null,
@@ -5732,8 +5735,8 @@ export class DatabaseService {
     const insertContactStmt = this.db.prepare(`
       INSERT OR IGNORE INTO master_recruiter_contacts (
         id, person_id, recruiter_name, contact_type, notes, contact_date, created_at,
-        contact_method, outcome, feedback_1, feedback_2, raw_feedback, source_file, application_id, source_row_number
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        contact_method, outcome, feedback_1, feedback_2, additional_feedback, raw_feedback, source_file, application_id, source_row_number
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const findExistingContactStmt = this.db.prepare(`
@@ -5874,32 +5877,38 @@ export class DatabaseService {
 
         if (Array.isArray(p.emails)) {
           for (const e of p.emails) {
+            const emailStr = typeof e === 'string' ? e : e.email;
+            if (!emailStr) continue;
+            const normEmail = typeof e === 'string' ? e.toLowerCase() : (e.normalized_email || e.email?.toLowerCase() || '');
             insertEmailStmt.run(
-              e.id || `${p.id}-em-${Date.now()}`,
+              (typeof e === 'object' && e.id) || `${p.id}-em-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
               p.id,
-              e.email,
-              e.normalized_email || e.email.toLowerCase(),
-              e.is_primary ? 1 : 0,
-              e.source || 'Import',
-              e.first_seen_at || now,
-              e.last_seen_at || now,
-              e.created_at || now
+              emailStr,
+              normEmail,
+              (typeof e === 'object' && e.is_primary) ? 1 : 0,
+              (typeof e === 'object' && e.source) || 'Import',
+              (typeof e === 'object' && e.first_seen_at) || now,
+              (typeof e === 'object' && e.last_seen_at) || now,
+              (typeof e === 'object' && e.created_at) || now
             );
           }
         }
 
         if (Array.isArray(p.phones)) {
           for (const ph of p.phones) {
+            const rawPhone = typeof ph === 'string' ? ph : (ph.phone_original || ph.phone);
+            if (!rawPhone) continue;
+            const normPhone = typeof ph === 'string' ? ph.replace(/\D/g, '') : (ph.phone_normalized || ph.phone?.replace(/\D/g, '') || '');
             insertPhoneStmt.run(
-              ph.id || `${p.id}-ph-${Date.now()}`,
+              (typeof ph === 'object' && ph.id) || `${p.id}-ph-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
               p.id,
-              ph.phone_original,
-              ph.phone_normalized,
-              ph.is_primary ? 1 : 0,
-              ph.source || 'Import',
-              ph.first_seen_at || now,
-              ph.last_seen_at || now,
-              ph.created_at || now
+              rawPhone,
+              normPhone,
+              (typeof ph === 'object' && ph.is_primary) ? 1 : 0,
+              (typeof ph === 'object' && ph.source) || 'Import',
+              (typeof ph === 'object' && ph.first_seen_at) || now,
+              (typeof ph === 'object' && ph.last_seen_at) || now,
+              (typeof ph === 'object' && ph.created_at) || now
             );
           }
         }
@@ -6016,13 +6025,14 @@ export class DatabaseService {
                 p.id,
                 recName,
                 c.contact_type || 'Phone',
-                rawFb,
+                c.notes || rawFb,
                 c.contact_date || now.split('T')[0],
                 c.created_at || now,
                 c.contact_method || c.contact_type || 'Phone',
                 c.outcome || null,
                 c.feedback_1 || null,
                 c.feedback_2 || null,
+                c.additional_feedback || null,
                 rawFb,
                 c.source_file || null,
                 c.application_id || null,
