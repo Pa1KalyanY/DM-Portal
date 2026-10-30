@@ -4290,6 +4290,8 @@ export class DatabaseService {
     contactFilter?: string;
     dateFrom?: string;
     dateTo?: string;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
   } = {}): { candidates: any[]; totalCount: number } {
     const opts = typeof params === 'string' ? { company: params } : (params || {});
     const page = Math.max(1, Number(opts.page) || 1);
@@ -4343,11 +4345,31 @@ export class DatabaseService {
     const countRow = this.db.prepare(`SELECT COUNT(*) as count FROM master_people p ${where}`).get(...values) as { count: number };
     const totalCount = countRow?.count || 0;
 
+    const sortBy = (opts as any).sortBy || 'created_at';
+    const sortOrder = (opts as any).sortOrder === 'asc' ? 'ASC' : 'DESC';
+
+    let orderByClause = 'p.created_at DESC';
+    if (sortBy === 'total_applications' || sortBy === 'repeat_applications') {
+      orderByClause = `(SELECT COUNT(*) FROM master_applications ma WHERE ma.person_id = p.id OR ma.person_id = p.person_id) ${sortOrder}, p.created_at DESC`;
+    } else if (sortBy === 'first_applied_date') {
+      orderByClause = `COALESCE((SELECT MIN(ma.date_applied) FROM master_applications ma WHERE ma.person_id = p.id OR ma.person_id = p.person_id), p.application_collected_date, substr(p.created_at, 1, 10)) ${sortOrder}, p.created_at DESC`;
+    } else if (sortBy === 'last_applied_date') {
+      orderByClause = `COALESCE((SELECT MAX(ma.date_applied) FROM master_applications ma WHERE ma.person_id = p.id OR ma.person_id = p.person_id), p.application_collected_date, substr(p.created_at, 1, 10)) ${sortOrder}, p.created_at DESC`;
+    } else if (sortBy === 'name' || sortBy === 'full_name') {
+      orderByClause = `p.full_name COLLATE NOCASE ${sortOrder}`;
+    } else if (sortBy === 'status') {
+      orderByClause = `p.current_status ${sortOrder}`;
+    } else if (sortBy === 'date_assigned' || sortBy === 'assigned_date') {
+      orderByClause = `COALESCE(p.recruiter_assigned_date, p.last_assignment_date, substr(p.created_at, 1, 10)) ${sortOrder}`;
+    } else if (sortBy === 'created_at') {
+      orderByClause = `p.created_at ${sortOrder}`;
+    }
+
     const peopleRows = this.db.prepare(`
       SELECT p.*
       FROM master_people p
       ${where}
-      ORDER BY p.created_at DESC
+      ORDER BY ${orderByClause}
       LIMIT ? OFFSET ?
     `).all(...values, pageSize, offset) as any[];
 
@@ -4438,9 +4460,10 @@ export class DatabaseService {
       }
       const cDate = (c.contact_date || (c.created_at ? c.created_at.split('T')[0] : '')).split('T')[0];
       const cRec = (c.recruiter_name || '').trim().toLowerCase();
-      const cF1 = (c.feedback_1 || '').trim();
-      const cF2 = (c.feedback_2 || '').trim();
-      const cKey = `${cDate}:::${cRec}:::${cF1}:::${cF2}:::${c.source_file || ''}:::${c.source_row_number ?? ''}`;
+      const cF1 = (c.feedback_1 || '').trim().toLowerCase();
+      const cF2 = (c.feedback_2 || '').trim().toLowerCase();
+      const cRaw = (c.raw_feedback || c.notes || '').trim().toLowerCase();
+      const cKey = `${cDate}:::${cRec}:::${cF1}:::${cF2}:::${cRaw}`;
       
       const personSeen = seenContactKeysByPerson.get(c.person_id)!;
       if (personSeen.has(cKey)) continue;
@@ -4509,6 +4532,12 @@ export class DatabaseService {
         }];
       }
 
+      const appDates = personApps.map((a: any) => a.date_applied).filter(Boolean).sort();
+      const firstAppliedDate = appDates[0] || p.application_collected_date || (p.created_at ? p.created_at.split('T')[0] : null);
+      const lastAppliedDate = appDates[appDates.length - 1] || p.application_collected_date || (p.created_at ? p.created_at.split('T')[0] : null);
+      const totalApplications = Math.max(personApps.length, 1);
+      const repeatApplications = Math.max(0, totalApplications - 1);
+
       // Authoritative owner from active assignment (status: 'Current')
       const activeAssign = personAssignments.find(a => a.status === 'Current') || personAssignments[0];
       const authoritativeOwner = activeAssign ? activeAssign.recruiter_name : (p.current_owner || 'Unassigned');
@@ -4556,6 +4585,10 @@ export class DatabaseService {
         created_at: p.created_at,
         updated_at: p.updated_at,
         last_activity_at: p.last_activity_at,
+        total_applications: totalApplications,
+        repeat_applications: repeatApplications,
+        first_applied_date: firstAppliedDate,
+        last_applied_date: lastAppliedDate,
         emails: emailsByPerson.get(p.id) || [],
         phones: phonesByPerson.get(p.id) || [],
         applications: personApps,
@@ -4573,7 +4606,7 @@ export class DatabaseService {
 
     const emails = this.db.prepare('SELECT * FROM master_person_emails WHERE person_id = ?').all(p.id) as any[];
     const phones = this.db.prepare('SELECT * FROM master_person_phones WHERE person_id = ?').all(p.id) as any[];
-    let applications = this.db.prepare('SELECT * FROM master_applications WHERE person_id = ? OR person_id = ?').all(p.id, p.person_id) as any[];
+    let applications = this.db.prepare('SELECT * FROM master_applications WHERE person_id = ? OR person_id = ? ORDER BY date_applied DESC, created_at DESC').all(p.id, p.person_id) as any[];
 
     // Fallback applications from applicants table (prevents "applications count showing but empty" problem)
     if (applications.length === 0) {
@@ -4608,6 +4641,26 @@ export class DatabaseService {
       }
     }
 
+    const appDates = applications.map(a => a.date_applied).filter(Boolean).sort();
+    const firstAppliedDate = appDates[0] || p.application_collected_date || (p.created_at ? p.created_at.split('T')[0] : null);
+    const lastAppliedDate = appDates[appDates.length - 1] || p.application_collected_date || (p.created_at ? p.created_at.split('T')[0] : null);
+    const totalApplications = Math.max(applications.length, 1);
+    const repeatApplications = Math.max(0, totalApplications - 1);
+
+    const transfers = (this.db.prepare('SELECT * FROM master_transfers WHERE person_id = ? OR person_id = ? ORDER BY transferred_at DESC').all(p.id, p.person_id) as any[]).map(t => ({
+      id: t.id,
+      screening_applicant_id: t.screening_applicant_id,
+      batch_id: t.batch_id,
+      company: t.company,
+      person_id: t.person_id,
+      application_id: t.application_id,
+      transfer_status: t.transfer_status,
+      duplicate_check_result: t.duplicate_check_result,
+      transferred_at: t.transferred_at,
+      transferred_by: t.transferred_by,
+      error_message: t.error_message,
+    }));
+
     let assignments = (this.db.prepare('SELECT * FROM master_recruiter_assignments WHERE person_id = ? OR person_id = ? ORDER BY assigned_date DESC, created_at DESC').all(p.id, p.person_id) as any[]).map(a => ({
       id: a.id,
       person_id: a.person_id,
@@ -4639,9 +4692,10 @@ export class DatabaseService {
     for (const rc of rawContacts) {
       const cDate = (rc.contact_date || (rc.created_at ? rc.created_at.split('T')[0] : '')).split('T')[0];
       const cRec = (rc.recruiter_name || '').trim().toLowerCase();
-      const cF1 = (rc.feedback_1 || '').trim();
-      const cF2 = (rc.feedback_2 || '').trim();
-      const cKey = `${cDate}:::${cRec}:::${cF1}:::${cF2}:::${rc.source_file || ''}:::${rc.source_row_number ?? ''}`;
+      const cF1 = (rc.feedback_1 || '').trim().toLowerCase();
+      const cF2 = (rc.feedback_2 || '').trim().toLowerCase();
+      const cRaw = (rc.raw_feedback || rc.notes || '').trim().toLowerCase();
+      const cKey = `${cDate}:::${cRec}:::${cF1}:::${cF2}:::${cRaw}`;
       if (seenContactKeys.has(cKey)) continue;
       seenContactKeys.add(cKey);
 
@@ -4717,6 +4771,10 @@ export class DatabaseService {
       created_at: p.created_at,
       updated_at: p.updated_at,
       last_activity_at: p.last_activity_at,
+      total_applications: totalApplications,
+      repeat_applications: repeatApplications,
+      first_applied_date: firstAppliedDate,
+      last_applied_date: lastAppliedDate,
       emails: emails.map(e => ({
         id: e.id,
         person_id: e.person_id,
@@ -4741,19 +4799,25 @@ export class DatabaseService {
         company: a.company,
         job_id: a.job_id,
         job_title: a.job_title,
+        technology: a.technology || null,
         date_applied: a.date_applied,
         application_collected_date: a.application_collected_date || null,
         recruiter_assigned_date: a.recruiter_assigned_date || null,
         green_card: a.green_card || null,
         h1b_status: a.h1b_status || null,
         current_stage: a.current_stage,
-        screening_result: a.effective_result,
+        screening_result: a.screening_result || a.effective_result || a.current_stage,
+        screening_applicant_id: a.screening_applicant_id || a.applicant_id || null,
+        source_batch_id: a.source_batch_id || null,
+        transfer_id: a.transfer_id || null,
         source_file: a.source_file,
+        source_row: a.source_row || null,
         resume_link: a.resume_url || a.resume_link,
         created_at: a.created_at,
       })),
       recruiter_contacts: contacts,
       assignments,
+      transfers,
       status_history: (this.db.prepare('SELECT * FROM master_status_history WHERE person_id = ? ORDER BY created_at DESC').all(p.id) as any[]).map(sh => ({
         id: sh.id,
         person_id: sh.person_id,

@@ -26,6 +26,9 @@ import {
   Sparkles,
   UploadCloud,
   MessageSquare,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { dbService, getCandidateDateApplied } from '../../services/masterDbService';
 import { api } from '../../api/client';
@@ -38,9 +41,10 @@ import {
   readPersistedBackupState,
   syncNavigationToUrlAndStorage,
 } from '../../shared/navigationState';
+import { ProfileTab } from './CandidateProfileView';
 
 interface CandidatesListViewProps {
-  onSelectCandidate: (personId: string) => void;
+  onSelectCandidate: (personId: string, initialTab?: ProfileTab) => void;
   initialSearchQuery?: string;
   currentUserCompany?: 'AaraTech' | 'ClinisolTech' | 'Both';
 }
@@ -138,6 +142,26 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
   });
   const [pageSize, setPageSize] = useState(10);
 
+  // Sorting State with URL sync
+  const [sortBy, setSortBy] = useState<string>(() => {
+    const urlState = readNavigationStateFromUrl();
+    return urlState.masterSortBy || 'created_at';
+  });
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(() => {
+    const urlState = readNavigationStateFromUrl();
+    return (urlState.masterSortOrder as 'asc' | 'desc') || 'desc';
+  });
+
+  const handleSortChange = (newSortBy: string) => {
+    if (sortBy === newSortBy) {
+      setSortOrder(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(newSortBy);
+      setSortOrder(newSortBy === 'full_name' ? 'asc' : 'desc');
+    }
+    setCurrentPage(1);
+  };
+
   // Sync Master Candidates filter state to URL
   useEffect(() => {
     syncNavigationToUrlAndStorage({
@@ -150,8 +174,10 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
       masterContact: contactFilter,
       masterTab: activeTab,
       masterPage: currentPage,
+      masterSortBy: sortBy !== 'created_at' ? sortBy : undefined,
+      masterSortOrder: sortOrder !== 'desc' ? sortOrder : undefined,
     }, 'replace');
-  }, [search, selectedCompany, selectedStatus, selectedOwner, selectedGender, contactFilter, activeTab, currentPage]);
+  }, [search, selectedCompany, selectedStatus, selectedOwner, selectedGender, contactFilter, activeTab, currentPage, sortBy, sortOrder]);
 
   // Batch Candidate Selection & Gender Assignment
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -327,6 +353,8 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
     customDateTo,
     currentPage,
     pageSize,
+    sortBy,
+    sortOrder,
   ]);
 
   const handleDatePresetChange = (preset: string) => {
@@ -375,6 +403,8 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
         hasLinkedIn: hasLinkedInOnly,
         dateFrom: customDateFrom || undefined,
         dateTo: customDateTo || undefined,
+        sortBy,
+        sortOrder,
       });
       setCandidates(data);
       setTotalCount(count);
@@ -398,6 +428,8 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
     setDatePreset('All');
     setCustomDateFrom('');
     setCustomDateTo('');
+    setSortBy('created_at');
+    setSortOrder('desc');
     setSelectedIds(new Set());
     setSelectAllMatching(false);
     setCurrentPage(1);
@@ -991,11 +1023,37 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-xs overflow-hidden">
         {/* Table View & Zoom Controls Toolbar */}
         <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2 text-slate-600 font-medium">
-            <span className="text-slate-500">Layout:</span>
-            <span className="font-semibold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
-              Full Width Adaptive (No Horizontal Scroll)
-            </span>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 text-slate-600 font-medium">
+              <span className="text-slate-500">Layout:</span>
+              <span className="font-semibold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
+                Adaptive Full Width
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-500 font-medium">Sort:</span>
+              <select
+                value={`${sortBy}:${sortOrder}`}
+                onChange={(e) => {
+                  const [newSort, newOrder] = e.target.value.split(':');
+                  setSortBy(newSort);
+                  setSortOrder(newOrder as 'asc' | 'desc');
+                  setCurrentPage(1);
+                }}
+                className="px-2 py-1 bg-white border border-slate-200 rounded text-xs font-semibold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 shadow-2xs cursor-pointer"
+              >
+                <option value="created_at:desc">Newest Added (Default)</option>
+                <option value="total_applications:desc">Total Applications (High to Low)</option>
+                <option value="repeat_applications:desc">Repeat Applications (High to Low)</option>
+                <option value="last_applied_date:desc">Latest Applied Date</option>
+                <option value="first_applied_date:asc">First Applied Date</option>
+                <option value="full_name:asc">Candidate Name (A-Z)</option>
+                <option value="full_name:desc">Candidate Name (Z-A)</option>
+                <option value="date_assigned:desc">Date Assigned (Newest)</option>
+                <option value="status:asc">Status</option>
+              </select>
+            </div>
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -1178,15 +1236,95 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
                     />
                   </th>
                   <th className="py-2.5 px-3 whitespace-nowrap">Person ID</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap">Date Assigned</th>
-                  <th className="py-2.5 px-3">Candidate Name</th>
+                  <th
+                    onClick={() => handleSortChange('date_assigned')}
+                    className="py-2.5 px-3 whitespace-nowrap cursor-pointer hover:text-slate-800 select-none"
+                    title="Click to sort by Date Assigned"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Date Assigned</span>
+                      {sortBy === 'date_assigned' ? (
+                        sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />
+                      ) : (
+                        <ArrowUpDown className="w-2.5 h-2.5 text-slate-300" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSortChange('full_name')}
+                    className="py-2.5 px-3 cursor-pointer hover:text-slate-800 select-none"
+                    title="Click to sort by Candidate Name"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Candidate Name</span>
+                      {sortBy === 'full_name' ? (
+                        sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />
+                      ) : (
+                        <ArrowUpDown className="w-2.5 h-2.5 text-slate-300" />
+                      )}
+                    </div>
+                  </th>
                   <th className="py-2.5 px-3 whitespace-nowrap">Role</th>
                   <th className="py-2.5 px-3">Emails</th>
                   <th className="py-2.5 px-3 whitespace-nowrap">Phones</th>
                   <th className="py-2.5 px-3">Location</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap">Apps &amp; Company</th>
+                  <th
+                    onClick={() => handleSortChange('total_applications')}
+                    className="py-2.5 px-3 whitespace-nowrap cursor-pointer hover:text-slate-800 select-none"
+                    title="Click to sort by Total Applications"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Applications</span>
+                      {sortBy === 'total_applications' ? (
+                        sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />
+                      ) : (
+                        <ArrowUpDown className="w-2.5 h-2.5 text-slate-300" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSortChange('repeat_applications')}
+                    className="py-2.5 px-3 whitespace-nowrap cursor-pointer hover:text-slate-800 select-none"
+                    title="Click to sort by Repeat Applications"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Repeat Apps</span>
+                      {sortBy === 'repeat_applications' ? (
+                        sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />
+                      ) : (
+                        <ArrowUpDown className="w-2.5 h-2.5 text-slate-300" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    onClick={() => handleSortChange('last_applied_date')}
+                    className="py-2.5 px-3 whitespace-nowrap cursor-pointer hover:text-slate-800 select-none"
+                    title="Click to sort by Applied Dates"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Applied Dates</span>
+                      {sortBy === 'last_applied_date' || sortBy === 'first_applied_date' ? (
+                        sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />
+                      ) : (
+                        <ArrowUpDown className="w-2.5 h-2.5 text-slate-300" />
+                      )}
+                    </div>
+                  </th>
                   <th className="py-2.5 px-3 whitespace-nowrap">Recruiter Feedback</th>
-                  <th className="py-2.5 px-3 whitespace-nowrap">Status</th>
+                  <th
+                    onClick={() => handleSortChange('status')}
+                    className="py-2.5 px-3 whitespace-nowrap cursor-pointer hover:text-slate-800 select-none"
+                    title="Click to sort by Status"
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Status</span>
+                      {sortBy === 'status' ? (
+                        sortOrder === 'asc' ? <ArrowUp className="w-3 h-3 text-blue-600" /> : <ArrowDown className="w-3 h-3 text-blue-600" />
+                      ) : (
+                        <ArrowUpDown className="w-2.5 h-2.5 text-slate-300" />
+                      )}
+                    </div>
+                  </th>
                   <th className="py-2.5 px-3 whitespace-nowrap">Owner</th>
                   <th className="py-2.5 px-3 text-right whitespace-nowrap">Actions</th>
                 </tr>
@@ -1194,7 +1332,7 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {loading ? (
                   <tr>
-                    <td colSpan={13} className="py-12 text-center text-slate-400">
+                    <td colSpan={15} className="py-12 text-center text-slate-400">
                       Loading candidate database records...
                     </td>
                   </tr>
@@ -1428,12 +1566,20 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
                           {cand.location || 'United States'}
                         </td>
 
-                        {/* 8. Apps & Company Origin */}
+                        {/* 8. Total Applications */}
                         <td className="py-2.5 px-3 align-middle whitespace-nowrap">
                           <div className="space-y-1">
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-blue-50 text-blue-700">
-                              {cand.applications?.length || 0} applied
-                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectCandidate(cand.id, 'applications');
+                              }}
+                              title="Click to view all application occurrences and timeline"
+                              className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors cursor-pointer"
+                            >
+                              {cand.total_applications || cand.applications?.length || 1} applied
+                            </button>
                             <div>
                               {hasAara && hasClini ? (
                                 <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
@@ -1452,6 +1598,53 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
                           </div>
                         </td>
 
+                        {/* 8B. Repeat Applications (Section 6 & 19) */}
+                        <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                          {(() => {
+                            const repeatCount = cand.repeat_applications !== undefined ? cand.repeat_applications : Math.max(0, (cand.applications?.length || 1) - 1);
+                            if (repeatCount > 0) {
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onSelectCandidate(cand.id, 'applications');
+                                  }}
+                                  title={`${repeatCount} repeat application(s) detected across roles/dates. Click to compare.`}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300 hover:bg-amber-100 transition-colors cursor-pointer"
+                                >
+                                  <RotateCcw className="w-3 h-3 text-amber-600" />
+                                  <span>{repeatCount} Repeat</span>
+                                </button>
+                              );
+                            }
+                            return (
+                              <span
+                                title="First-time candidate for this company"
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              >
+                                First-Time
+                              </span>
+                            );
+                          })()}
+                        </td>
+
+                        {/* 8C. Applied Dates (First & Latest) */}
+                        <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                          <div className="text-[11px] font-mono text-slate-600 space-y-0.5">
+                            <div title="Latest application date">
+                              <span className="text-slate-400 text-[10px] mr-1">Latest:</span>
+                              <span className="font-semibold text-slate-800">{cand.last_applied_date || cand.application_collected_date || (cand.created_at ? cand.created_at.split('T')[0] : '—')}</span>
+                            </div>
+                            {cand.first_applied_date && cand.first_applied_date !== cand.last_applied_date && (
+                              <div title="First application date">
+                                <span className="text-slate-400 text-[10px] mr-1">First:</span>
+                                <span>{cand.first_applied_date}</span>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+
                         {/* 9. Recruiter Feedback */}
                         <td className="py-2.5 px-3 align-middle text-xs">
                           {cand.recruiter_contacts && cand.recruiter_contacts.length > 0 ? (
@@ -1459,7 +1652,7 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onSelectCandidate(cand.id);
+                                onSelectCandidate(cand.id, 'feedback');
                               }}
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 cursor-pointer transition-colors max-w-[180px] truncate"
                               title={cand.recruiter_contacts[0]?.original_feedback || cand.recruiter_contacts[0]?.notes || 'Click to view recruiter feedback details in candidate profile'}
@@ -1468,9 +1661,17 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
                               <span className="truncate">{cand.recruiter_contacts[0]?.outcome || cand.recruiter_contacts[0]?.feedback_1 || `${cand.recruiter_contacts.length} feedback`}</span>
                             </button>
                           ) : cand.latest_contact_outcome ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 max-w-[180px] truncate" title={cand.latest_contact_outcome}>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onSelectCandidate(cand.id, 'feedback');
+                              }}
+                              className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 max-w-[180px] truncate cursor-pointer"
+                              title={cand.latest_contact_outcome}
+                            >
                               {cand.latest_contact_outcome}
-                            </span>
+                            </button>
                           ) : (
                             <span className="text-slate-400 text-xs">—</span>
                           )}
@@ -1523,7 +1724,7 @@ export const CandidatesListView: React.FC<CandidatesListViewProps> = ({
                         {/* 12. Actions */}
                         <td className="py-2.5 px-3 align-middle text-right whitespace-nowrap">
                           <button
-                            onClick={() => onSelectCandidate(cand.id)}
+                            onClick={() => onSelectCandidate(cand.id, 'overview')}
                             className="px-3 py-1.5 bg-blue-50 hover:bg-blue-600 hover:text-white text-blue-700 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer"
                           >
                             <Eye className="w-3.5 h-3.5" />

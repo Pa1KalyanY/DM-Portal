@@ -9,7 +9,7 @@ import { TeamSettingsView } from './views/settings/TeamSettingsView';
 import { DmPortalSettingsView } from './views/settings/DmPortalSettingsView';
 import { MarketingWorkspaceView } from './views/marketing/MarketingWorkspaceView';
 import { CandidatesListView } from './views/candidates/CandidatesListView';
-import { CandidateProfileView } from './views/candidates/CandidateProfileView';
+import { CandidateProfileView, ProfileTab } from './views/candidates/CandidateProfileView';
 import { TestCasesModal } from './views/TestCasesModal';
 import { ExportModal } from './components/ExportModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -45,9 +45,14 @@ function MainAppContent() {
     const urlState = readNavigationStateFromUrl();
     return urlState.candidateId || null;
   });
+  const [selectedCandidateTab, setSelectedCandidateTab] = useState<ProfileTab>(() => {
+    const urlState = readNavigationStateFromUrl();
+    return (urlState.candidateTab as ProfileTab) || 'overview';
+  });
 
   const handleSelectSection = (sec: MainNavSection) => {
     setSelectedCandidateId(null);
+    setSelectedCandidateTab('overview');
     setCurrentSection(sec);
     localStorage.setItem('aat_nav_section', sec);
     if (sec === 'home' || sec === 'marketing' || sec === 'settings') {
@@ -59,24 +64,29 @@ function MainAppContent() {
       section: sec,
       company: activeCompany,
       candidateId: null,
+      candidateTab: undefined,
     }, 'push');
   };
 
-  const handleOpenCandidate = (personId: string) => {
+  const handleOpenCandidate = (personId: string, tab: ProfileTab = 'overview') => {
     setSelectedCandidateId(personId);
+    setSelectedCandidateTab(tab);
     syncNavigationToUrlAndStorage({
       section: currentSection,
       company: activeCompany,
       candidateId: personId,
+      candidateTab: tab !== 'overview' ? tab : undefined,
     }, 'push');
   };
 
   const handleCloseCandidate = () => {
     setSelectedCandidateId(null);
+    setSelectedCandidateTab('overview');
     syncNavigationToUrlAndStorage({
       section: currentSection,
       company: activeCompany,
       candidateId: null,
+      candidateTab: undefined,
     }, 'push');
   };
 
@@ -97,8 +107,10 @@ function MainAppContent() {
       }
       if (urlState.candidateId !== undefined) {
         setSelectedCandidateId(urlState.candidateId);
+        setSelectedCandidateTab((urlState.candidateTab as ProfileTab) || 'overview');
       } else {
         setSelectedCandidateId(null);
+        setSelectedCandidateTab('overview');
       }
     };
 
@@ -276,8 +288,9 @@ function MainAppContent() {
             <ErrorBoundary fallbackTitle="Could not load candidate profile" onReset={handleCloseCandidate}>
               <CandidateProfileView
                 personId={selectedCandidateId}
+                initialTab={selectedCandidateTab}
                 onBack={handleCloseCandidate}
-                onNavigateCandidate={(id) => handleOpenCandidate(id)}
+                onNavigateCandidate={(id, tab) => handleOpenCandidate(id, tab)}
               />
             </ErrorBoundary>
           </div>

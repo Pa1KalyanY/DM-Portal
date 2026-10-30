@@ -29,6 +29,9 @@ import {
   Activity,
   UserPlus,
   UserX,
+  History,
+  GitCommit,
+  RotateCcw,
 } from 'lucide-react';
 import { dbService } from '../../services/masterDbService';
 import { Person, CandidateStatus, Application, RecruiterContact, RecruiterAssignment } from '../../types/masterDatabase';
@@ -39,7 +42,7 @@ import { classifyUrl, extractUrlsFromText } from '../../shared/urlClassifier';
 interface CandidateProfileViewProps {
   personId: string;
   onBack: () => void;
-  onNavigateCandidate?: (id: string) => void;
+  onNavigateCandidate?: (id: string, tab?: ProfileTab) => void;
   initialTab?: ProfileTab;
 }
 
@@ -49,7 +52,8 @@ export type ProfileTab =
   | 'recruiter_history'
   | 'feedback'
   | 'documents'
-  | 'data_quality';
+  | 'data_quality'
+  | 'source_history';
 
 const STATUS_OPTIONS: CandidateStatus[] = [
   'New',
@@ -72,6 +76,12 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
   const [candidate, setCandidate] = useState<Person | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<ProfileTab>(initialTab);
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Modals
   const [editProfileModalOpen, setEditProfileModalOpen] = useState(false);
@@ -267,9 +277,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
   const uniqueRecruiterContacts = (candidate.recruiter_contacts || []).filter((c) => {
     const cDate = c.contact_date || (c as any).created_at?.split('T')[0] || '';
     const cRec = (c.recruiter_name || '').trim().toLowerCase();
-    const cF1 = ((c as any).feedback_1 || '').trim();
-    const cF2 = ((c as any).feedback_2 || '').trim();
-    const cKey = `${cDate}:::${cRec}:::${cF1}:::${cF2}:::${(c as any).source_file || ''}:::${(c as any).source_row_number ?? ''}`;
+    const cF1 = ((c as any).feedback_1 || '').trim().toLowerCase();
+    const cF2 = ((c as any).feedback_2 || '').trim().toLowerCase();
+    const cRaw = ((c as any).raw_feedback || c.notes || '').trim().toLowerCase();
+    const cKey = `${cDate}:::${cRec}:::${cF1}:::${cF2}:::${cRaw}`;
     if (seenContacts.has(cKey)) return false;
     seenContacts.add(cKey);
     return true;
@@ -277,6 +288,8 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
 
   // Calculate Accurate Summary Metrics (Part 7D: Distinct metrics, not combined!)
   const applicationsCount = candidate.applications?.length || 0;
+  const totalApplications = candidate.total_applications || applicationsCount || 1;
+  const repeatApplications = candidate.repeat_applications !== undefined ? candidate.repeat_applications : Math.max(0, applicationsCount - 1);
   
   const allRecruiterNames = new Set<string>();
   if (candidate.current_owner && candidate.current_owner !== 'Unassigned') allRecruiterNames.add(candidate.current_owner);
@@ -295,12 +308,24 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
   const roleDisplay = cleanJobTitle(candidate.current_title || primaryApp?.job_title) || 'Candidate Application';
   const assignedDateDisplay = candidate.last_assignment_date || candidate.recruiter_assigned_date || primaryApp?.date_applied || candidate.created_at?.split('T')[0] || 'Not recorded';
   const collectionDateDisplay = candidate.application_collected_date || (primaryApp as any)?.application_collected_date || primaryApp?.date_applied || candidate.created_at?.split('T')[0] || 'Not recorded';
+  const firstAppliedDate = candidate.first_applied_date || primaryApp?.date_applied || collectionDateDisplay;
+  const lastAppliedDate = candidate.last_applied_date || primaryApp?.date_applied || collectionDateDisplay;
   const lastActivityDisplay = candidate.last_activity_at ? new Date(candidate.last_activity_at).toLocaleDateString() : 'N/A';
   const ownerDisplay = (!candidate.current_owner || candidate.current_owner === 'Unassigned' || candidate.current_owner === 'Adam') ? 'Needs assignment' : candidate.current_owner;
   const greenCardDisplay = candidate.green_card || (primaryApp as any)?.green_card || 'Not specified';
   const h1bDisplay = candidate.h1b_status || (primaryApp as any)?.h1b_status || 'Not specified';
   const lastContactDateDisplay = candidate.last_contact_date || (uniqueRecruiterContacts[0]?.contact_date) || 'Not contacted';
   const nextFollowUpDisplay = (uniqueRecruiterContacts.find(c => (c as any).next_follow_up) as any)?.next_follow_up || 'None recorded';
+
+  // Profile Completeness Score (Section 9)
+  let completenessScore = 0;
+  if (candidate.full_name && !isPhoneNumber(candidate.full_name)) completenessScore += 15;
+  if (candidate.primary_email) completenessScore += 20;
+  if (candidate.primary_phone) completenessScore += 20;
+  if (candidate.location) completenessScore += 10;
+  if (candidate.current_title || applicationsCount > 0) completenessScore += 15;
+  if (strictlyClassifiedResume || strictlyClassifiedLinkedIn) completenessScore += 10;
+  if (candidate.green_card || candidate.h1b_status) completenessScore += 10;
 
   // Consolidated Chronological Timeline Events (Part 3C)
   const timelineEvents: {
@@ -854,6 +879,24 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
             </span>
           )}
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('source_history')}
+          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
+            activeTab === 'source_history'
+              ? 'border-blue-600 text-blue-600 font-bold'
+              : 'border-transparent text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <History className="w-3.5 h-3.5" />
+          <span>Source History</span>
+          {candidate.transfers && candidate.transfers.length > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-purple-100 text-purple-700 font-bold">
+              {candidate.transfers.length}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* TAB 1: OVERVIEW (Section 3C) */}
@@ -1056,39 +1099,222 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
         </div>
       )}
 
-      {/* TAB 2: APPLICATIONS */}
+      {/* TAB 2: APPLICATIONS (Section 6 & 19: Repeat Application Tracking) */}
       {activeTab === 'applications' && (
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-5">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100 flex-wrap gap-2">
             <div>
-              <h3 className="text-sm font-bold text-slate-900">Candidate Applications</h3>
-              <p className="text-xs text-slate-500">
-                Preserves separate applications across companies and roles without overwriting history.
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-900">Application Occurrence Timeline</h3>
+                {repeatApplications > 0 ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-800 border border-amber-300">
+                    <RotateCcw className="w-3 h-3 text-amber-600" />
+                    <span>Repeat Candidate ({repeatApplications} repeat application{repeatApplications !== 1 ? 's' : ''})</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    <span>First-Time Applicant</span>
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Preserves separate application occurrences across roles, technologies, and dates without overwriting candidate history.
               </p>
             </div>
-            <span className="px-2 py-0.5 rounded font-mono text-xs font-semibold bg-blue-50 text-blue-700">
-              {applicationsCount} Application{applicationsCount !== 1 ? 's' : ''}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-1 rounded font-mono text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                {totalApplications} Total Application{totalApplications !== 1 ? 's' : ''}
+              </span>
+            </div>
           </div>
 
+          {/* Quick Technology & Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">First Applied Date</span>
+              <span className="font-mono font-semibold text-slate-800 text-xs mt-0.5 block">{firstAppliedDate}</span>
+            </div>
+            <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Latest Applied Date</span>
+              <span className="font-mono font-semibold text-slate-800 text-xs mt-0.5 block">{lastAppliedDate}</span>
+            </div>
+            <div className="bg-slate-50 rounded-xl p-3 border border-slate-200">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">Technology Breakdown</span>
+              <div className="flex flex-wrap gap-1 mt-1">
+                {(() => {
+                  const techCounts = new Map<string, number>();
+                  (candidate.applications || []).forEach(a => {
+                    const tech = a.technology || cleanJobTitle(a.job_title) || 'General';
+                    techCounts.set(tech, (techCounts.get(tech) || 0) + 1);
+                  });
+                  return Array.from(techCounts.entries()).map(([tech, count]) => (
+                    <span key={tech} className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white border border-slate-200 text-slate-700">
+                      {tech} ({count})
+                    </span>
+                  ));
+                })()}
+              </div>
+            </div>
+          </div>
+
+          {/* Current vs Previous Application Comparison (Section 19) */}
+          {candidate.applications && candidate.applications.length > 1 && (() => {
+            const sortedApps = [...candidate.applications].sort((a, b) =>
+              (b.date_applied || '').localeCompare(a.date_applied || '')
+            );
+            const latestApp = sortedApps[0];
+            const previousApp = sortedApps[1];
+            const resumeChanged = Boolean(latestApp.resume_link && previousApp.resume_link && latestApp.resume_link !== previousApp.resume_link);
+            const roleChanged = cleanJobTitle(latestApp.job_title) !== cleanJobTitle(previousApp.job_title);
+
+            return (
+              <div className="border border-indigo-200 rounded-xl p-4 bg-indigo-50/30 space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-indigo-100 flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <RotateCcw className="w-4 h-4 text-indigo-600" />
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-950">
+                      Current vs Previous Application Comparison (Section 19)
+                    </h4>
+                  </div>
+                  <span className="text-[11px] font-semibold text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200">
+                    Comparing Latest (App #{sortedApps.length}) vs Prior (App #{sortedApps.length - 1})
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left bg-white rounded-lg border border-indigo-100 overflow-hidden">
+                    <thead className="bg-indigo-50/70 text-indigo-900 font-bold border-b border-indigo-100">
+                      <tr>
+                        <th className="py-2 px-3 w-1/4">Comparison Field</th>
+                        <th className="py-2 px-3 w-3/8 text-slate-700">Previous Application</th>
+                        <th className="py-2 px-3 w-3/8 text-indigo-900">Current (Latest) Application</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs">
+                      <tr>
+                        <td className="py-2 px-3 font-semibold text-slate-500">Job Role / Position</td>
+                        <td className="py-2 px-3 font-medium text-slate-700">{cleanJobTitle(previousApp.job_title)}</td>
+                        <td className="py-2 px-3 font-bold text-slate-900">
+                          <div className="flex items-center gap-1.5">
+                            <span>{cleanJobTitle(latestApp.job_title)}</span>
+                            {roleChanged && (
+                              <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-800">
+                                New Role
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 px-3 font-semibold text-slate-500">Technology / Domain</td>
+                        <td className="py-2 px-3 text-slate-700">{previousApp.technology || cleanJobTitle(previousApp.job_title)}</td>
+                        <td className="py-2 px-3 font-semibold text-indigo-900">{latestApp.technology || cleanJobTitle(latestApp.job_title)}</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 px-3 font-semibold text-slate-500">Company Context</td>
+                        <td className="py-2 px-3 text-slate-700">{previousApp.company}</td>
+                        <td className="py-2 px-3 font-semibold text-slate-900">{latestApp.company}</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 px-3 font-semibold text-slate-500">Application Date</td>
+                        <td className="py-2 px-3 font-mono text-slate-600">{previousApp.date_applied || 'Not recorded'}</td>
+                        <td className="py-2 px-3 font-mono font-bold text-indigo-900">{latestApp.date_applied || 'Not recorded'}</td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 px-3 font-semibold text-slate-500">Screening Outcome</td>
+                        <td className="py-2 px-3">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            {previousApp.screening_result || previousApp.current_stage || 'PASS'}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            {latestApp.screening_result || latestApp.current_stage || 'PASS'}
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 px-3 font-semibold text-slate-500">Resume Document</td>
+                        <td className="py-2 px-3">
+                          {previousApp.resume_link ? (
+                            <a href={previousApp.resume_link} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-semibold inline-flex items-center gap-1">
+                              <span>Prior Resume</span>
+                              <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                          ) : (
+                            <span className="text-slate-400 italic">None</span>
+                          )}
+                        </td>
+                        <td className="py-2 px-3">
+                          <div className="flex items-center gap-2">
+                            {latestApp.resume_link ? (
+                              <a href={latestApp.resume_link} target="_blank" rel="noopener noreferrer" className="text-purple-600 hover:underline font-semibold inline-flex items-center gap-1">
+                                <span>Latest Resume</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </a>
+                            ) : (
+                              <span className="text-slate-400 italic">None</span>
+                            )}
+                            {resumeChanged ? (
+                              <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-purple-100 text-purple-700">
+                                Updated Resume Link
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.2 rounded text-[10px] text-slate-500 bg-slate-100">
+                                Same Link
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="py-2 px-3 font-semibold text-slate-500">Source Provenance</td>
+                        <td className="py-2 px-3 font-mono text-[11px] text-slate-500">
+                          {previousApp.source_file ? `${previousApp.source_file}${previousApp.source_row ? ` (Row ${previousApp.source_row})` : ''}` : 'Direct intake'}
+                        </td>
+                        <td className="py-2 px-3 font-mono text-[11px] text-slate-700">
+                          {latestApp.source_file ? `${latestApp.source_file}${latestApp.source_row ? ` (Row ${latestApp.source_row})` : ''}` : 'Direct intake'}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Chronological Applications List */}
           {candidate.applications && candidate.applications.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                   <tr>
+                    <th className="py-2.5 px-3">App #</th>
                     <th className="py-2.5 px-3">Company</th>
                     <th className="py-2.5 px-3">Job Role</th>
+                    <th className="py-2.5 px-3">Technology</th>
                     <th className="py-2.5 px-3">Job ID / Slot</th>
                     <th className="py-2.5 px-3">Date Applied / Collected</th>
-                    <th className="py-2.5 px-3">Recruiter Assigned Date</th>
                     <th className="py-2.5 px-3">Status</th>
                     <th className="py-2.5 px-3">Source Provenance</th>
                     <th className="py-2.5 px-3 text-right">Resume</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {candidate.applications.map((app) => (
+                  {candidate.applications.map((app, idx) => (
                     <tr key={app.id} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="py-2.5 px-3 font-bold font-mono text-slate-700">
+                        {idx === 0 ? (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800">
+                            #{candidate.applications!.length - idx} (Latest)
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono text-slate-600 bg-slate-100">
+                            #{candidate.applications!.length - idx}
+                          </span>
+                        )}
+                      </td>
                       <td className="py-2.5 px-3 font-semibold text-slate-900">
                         <span
                           className={`px-2 py-0.5 rounded text-[11px] font-bold ${
@@ -1103,14 +1329,14 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                       <td className="py-2.5 px-3 font-medium text-slate-800">
                         {cleanJobTitle(app.job_title)}
                       </td>
+                      <td className="py-2.5 px-3 font-semibold text-slate-700">
+                        {app.technology || cleanJobTitle(app.job_title)}
+                      </td>
                       <td className="py-2.5 px-3 font-mono text-slate-500">
                         {app.job_id || '—'}
                       </td>
                       <td className="py-2.5 px-3 font-mono text-slate-700">
                         {(app as any).application_collected_date || app.date_applied || 'Not recorded'}
-                      </td>
-                      <td className="py-2.5 px-3 font-mono text-slate-700">
-                        {(app as any).recruiter_assigned_date || '—'}
                       </td>
                       <td className="py-2.5 px-3 font-semibold">
                         <span
@@ -1120,7 +1346,7 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                               : 'bg-slate-100 text-slate-700'
                           }`}
                         >
-                          {app.current_stage}
+                          {app.screening_result || app.current_stage || 'PASS'}
                         </span>
                       </td>
                       <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500">
@@ -1481,6 +1707,34 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
             </div>
           </div>
 
+          {/* Completeness Score Gauge (Section 9) */}
+          <div className="bg-slate-50/70 rounded-xl border border-slate-200 p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-blue-600" />
+                <span>Candidate Profile Completeness Score</span>
+              </span>
+              <span className={`text-sm font-extrabold ${completenessScore >= 80 ? 'text-emerald-700' : completenessScore >= 50 ? 'text-amber-700' : 'text-rose-700'}`}>
+                {completenessScore}% Complete
+              </span>
+            </div>
+            <div className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all duration-300 rounded-full ${completenessScore >= 80 ? 'bg-emerald-500' : completenessScore >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                style={{ width: `${completenessScore}%` }}
+              />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 text-[11px] text-slate-600">
+              <span className={candidate.full_name && !isPhoneNumber(candidate.full_name) ? 'text-emerald-700 font-semibold' : 'text-slate-400'}>✓ Name (15%)</span>
+              <span className={candidate.primary_email ? 'text-emerald-700 font-semibold' : 'text-slate-400'}>✓ Email (20%)</span>
+              <span className={candidate.primary_phone ? 'text-emerald-700 font-semibold' : 'text-slate-400'}>✓ Phone (20%)</span>
+              <span className={candidate.location ? 'text-emerald-700 font-semibold' : 'text-slate-400'}>✓ Location (10%)</span>
+              <span className={candidate.current_title || applicationsCount > 0 ? 'text-emerald-700 font-semibold' : 'text-slate-400'}>✓ Role / Apps (15%)</span>
+              <span className={strictlyClassifiedResume || strictlyClassifiedLinkedIn ? 'text-emerald-700 font-semibold' : 'text-slate-400'}>✓ Resume / LinkedIn (10%)</span>
+              <span className={candidate.green_card || candidate.h1b_status ? 'text-emerald-700 font-semibold' : 'text-slate-400'}>✓ Work Auth (10%)</span>
+            </div>
+          </div>
+
           {/* Clean State */}
           {dataQualityIssues.length === 0 ? (
             <div className="p-8 text-center bg-emerald-50/50 rounded-xl border border-emerald-200/60 space-y-2">
@@ -1628,6 +1882,168 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 7: SOURCE HISTORY & AUDIT TRAIL (Section 16 & 24) */}
+      {activeTab === 'source_history' && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs space-y-5">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100 flex-wrap gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-900">Source Provenance &amp; Transfer Audit History</h3>
+                <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                  {candidate.person_id}
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Complete audit trail of how this candidate and their application occurrences entered the Master Database.
+              </p>
+            </div>
+          </div>
+
+          {/* System Identity & Timestamps */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-200 space-y-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
+                Master Database Identification
+              </span>
+              <div className="space-y-1.5 pt-1">
+                <div className="flex justify-between py-1 border-b border-slate-100">
+                  <span className="text-slate-500">Internal Person UUID:</span>
+                  <span className="font-mono text-slate-800 text-[11px] truncate max-w-[220px]" title={candidate.id}>{candidate.id}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-100">
+                  <span className="text-slate-500">Public Person ID:</span>
+                  <span className="font-mono font-bold text-blue-700">{candidate.person_id}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-100">
+                  <span className="text-slate-500">Company Tenant:</span>
+                  <span className="font-semibold text-slate-800">{candidate.company || companyContext}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-100">
+                  <span className="text-slate-500">Current Status:</span>
+                  <span className="font-semibold text-slate-800">{candidate.current_status}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-slate-50/70 p-4 rounded-xl border border-slate-200 space-y-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
+                System Lifecycle Timestamps
+              </span>
+              <div className="space-y-1.5 pt-1">
+                <div className="flex justify-between py-1 border-b border-slate-100">
+                  <span className="text-slate-500">Profile Created At:</span>
+                  <span className="font-mono text-slate-800">{candidate.created_at ? new Date(candidate.created_at).toLocaleString() : 'N/A'}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-100">
+                  <span className="text-slate-500">Profile Last Updated:</span>
+                  <span className="font-mono text-slate-800">{candidate.updated_at ? new Date(candidate.updated_at).toLocaleString() : 'N/A'}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-100">
+                  <span className="text-slate-500">Last System Activity:</span>
+                  <span className="font-mono text-slate-800">{candidate.last_activity_at ? new Date(candidate.last_activity_at).toLocaleString() : 'N/A'}</span>
+                </div>
+                <div className="flex justify-between py-1 border-b border-slate-100">
+                  <span className="text-slate-500">Intake / Collection Date:</span>
+                  <span className="font-mono text-slate-800">{collectionDateDisplay}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Transfer History (master_transfers) */}
+          <div className="space-y-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <GitCommit className="w-3.5 h-3.5 text-purple-600" />
+              <span>Screening to Master DB Transfer Audit Log</span>
+            </h4>
+
+            {candidate.transfers && candidate.transfers.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left bg-white rounded-lg border border-slate-200 overflow-hidden">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="py-2 px-3">Transfer ID</th>
+                      <th className="py-2 px-3">Batch ID</th>
+                      <th className="py-2 px-3">Screening ID</th>
+                      <th className="py-2 px-3">Company</th>
+                      <th className="py-2 px-3">Transfer Status</th>
+                      <th className="py-2 px-3">Duplicate Intelligence</th>
+                      <th className="py-2 px-3">Transferred At</th>
+                      <th className="py-2 px-3">Transferred By</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
+                    {candidate.transfers.map((t: any) => (
+                      <tr key={t.id} className="hover:bg-slate-50/70">
+                        <td className="py-2 px-3 font-semibold text-slate-900 truncate max-w-[120px]" title={t.id}>{t.id}</td>
+                        <td className="py-2 px-3 text-slate-700 truncate max-w-[120px]" title={t.batch_id}>{t.batch_id}</td>
+                        <td className="py-2 px-3 text-slate-700 truncate max-w-[120px]" title={t.screening_applicant_id}>{t.screening_applicant_id}</td>
+                        <td className="py-2 px-3 font-semibold">{t.company}</td>
+                        <td className="py-2 px-3">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            t.transfer_status === 'TRANSFERRED'
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-rose-50 text-rose-700 border border-rose-200'
+                          }`}>
+                            {t.transfer_status}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 font-sans text-xs text-slate-800">{t.duplicate_check_result || 'PASSED TRANSFER'}</td>
+                        <td className="py-2 px-3 text-slate-600">{t.transferred_at ? new Date(t.transferred_at).toLocaleString() : '—'}</td>
+                        <td className="py-2 px-3 font-sans text-xs text-slate-700">{t.transferred_by || 'System'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-500">
+                Candidate was onboarded directly into the Master Candidate Database or prior to individual transfer tracking. Subsequent transfers from the LinkedIn Filter will be audited here automatically.
+              </div>
+            )}
+          </div>
+
+          {/* Status Change History (master_status_history) */}
+          <div className="space-y-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-blue-600" />
+              <span>Status Audit Trail (master_status_history)</span>
+            </h4>
+
+            {candidate.status_history && candidate.status_history.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left bg-white rounded-lg border border-slate-200 overflow-hidden">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="py-2 px-3">Previous Status</th>
+                      <th className="py-2 px-3">New Status</th>
+                      <th className="py-2 px-3">Changed By</th>
+                      <th className="py-2 px-3">Reason / Details</th>
+                      <th className="py-2 px-3">Timestamp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs">
+                    {candidate.status_history.map((sh: any) => (
+                      <tr key={sh.id} className="hover:bg-slate-50/70">
+                        <td className="py-2 px-3 text-slate-500">{sh.old_status || 'Initial'}</td>
+                        <td className="py-2 px-3 font-bold text-blue-700">{sh.new_status}</td>
+                        <td className="py-2 px-3 text-slate-700">{sh.changed_by || 'System'}</td>
+                        <td className="py-2 px-3 text-slate-600">{sh.reason || '—'}</td>
+                        <td className="py-2 px-3 font-mono text-[11px] text-slate-500">{sh.created_at ? new Date(sh.created_at).toLocaleString() : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-500">
+                Initial status: <strong>{candidate.current_status}</strong>. No manual status transitions recorded.
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -1052,6 +1052,8 @@ export const api = {
     contactFilter?: string;
     dateFrom?: string;
     dateTo?: string;
+    sortBy?: string;
+    sortOrder?: 'asc' | 'desc';
   }) => {
     const query = new URLSearchParams();
     if (params?.page) query.set('page', String(params.page));
@@ -1064,6 +1066,8 @@ export const api = {
     if (params?.contactFilter && params.contactFilter !== 'all') query.set('contactFilter', params.contactFilter);
     if (params?.dateFrom) query.set('dateFrom', params.dateFrom);
     if (params?.dateTo) query.set('dateTo', params.dateTo);
+    if (params?.sortBy) query.set('sortBy', params.sortBy);
+    if (params?.sortOrder) query.set('sortOrder', params.sortOrder);
 
     const res = await fetch(`/api/master-candidates?${query.toString()}`, {
       headers: params?.company && params.company !== 'All' && params.company !== 'Both' ? { 'x-company': params.company } : {},

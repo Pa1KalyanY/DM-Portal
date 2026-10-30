@@ -1464,6 +1464,8 @@ app.get('/api/master-candidates', (req: Request, res: Response): void => {
     const contactFilter = req.query.contactFilter as string;
     const dateFrom = req.query.dateFrom as string;
     const dateTo = req.query.dateTo as string;
+    const sortBy = req.query.sortBy as string;
+    const sortOrder = req.query.sortOrder as ('asc' | 'desc');
 
     const result = dbService.getMasterCandidates({
       company,
@@ -1476,6 +1478,8 @@ app.get('/api/master-candidates', (req: Request, res: Response): void => {
       contactFilter,
       dateFrom,
       dateTo,
+      sortBy,
+      sortOrder,
     });
 
     res.json({

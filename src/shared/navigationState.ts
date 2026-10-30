@@ -17,6 +17,7 @@ export interface NavigationState {
   section: MainNavSection;
   company: CompanyName;
   candidateId?: string | null;
+  candidateTab?: string;
 
   // Recruitment: LinkedIn Application Filter (8-Step Pipeline)
   slot?: string;
@@ -48,6 +49,8 @@ export interface NavigationState {
   masterContact?: string;
   masterTab?: 'completed' | 'incomplete' | 'upload';
   masterPage?: number;
+  masterSortBy?: string;
+  masterSortOrder?: 'asc' | 'desc';
 
   // Shared DM Portal: Marketing Operations
   mktTab?: 'attendance' | 'tasks' | 'content' | 'reports' | 'team';
@@ -110,6 +113,9 @@ export function readNavigationStateFromUrl(): Partial<NavigationState> {
     if (params.has('candId')) {
       parsed.candidateId = params.get('candId') || null;
     }
+    if (params.has('candTab')) {
+      parsed.candidateTab = params.get('candTab') || undefined;
+    }
 
     // Filter Workspace
     if (params.has('slot')) parsed.slot = params.get('slot') || 'ALL';
@@ -162,6 +168,11 @@ export function readNavigationStateFromUrl(): Partial<NavigationState> {
     if (params.has('mPage')) {
       const mp = parseInt(params.get('mPage') || '1', 10);
       if (!isNaN(mp) && mp > 0) parsed.masterPage = mp;
+    }
+    if (params.has('mSort')) parsed.masterSortBy = params.get('mSort') || undefined;
+    if (params.has('mOrder')) {
+      const mo = params.get('mOrder');
+      if (mo === 'asc' || mo === 'desc') parsed.masterSortOrder = mo;
     }
 
     // Marketing Workspace
@@ -242,8 +253,11 @@ export function syncNavigationToUrlAndStorage(
     // Candidate Drawer
     if (state.candidateId) {
       currentParams.set('candId', state.candidateId);
+      if (state.candidateTab) currentParams.set('candTab', state.candidateTab);
+      else currentParams.delete('candTab');
     } else {
       currentParams.delete('candId');
+      currentParams.delete('candTab');
     }
 
     // Filter Workspace Specifics
@@ -328,6 +342,12 @@ export function syncNavigationToUrlAndStorage(
 
       if (state.masterPage && state.masterPage > 1) currentParams.set('mPage', String(state.masterPage));
       else currentParams.delete('mPage');
+
+      if (state.masterSortBy) currentParams.set('mSort', state.masterSortBy);
+      else currentParams.delete('mSort');
+
+      if (state.masterSortOrder) currentParams.set('mOrder', state.masterSortOrder);
+      else currentParams.delete('mOrder');
     }
 
     // Marketing Specifics

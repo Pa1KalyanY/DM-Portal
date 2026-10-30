@@ -82,6 +82,12 @@ export interface Person {
   last_contact_date?: string | null;
   next_followup_date?: string | null;
 
+  // Repeat Application & Occurrence Tracking (Section 6 & 19)
+  total_applications?: number;
+  repeat_applications?: number;
+  first_applied_date?: string | null;
+  last_applied_date?: string | null;
+
   // Extra populated source fields
   extra_source_fields?: Record<string, any>;
   
@@ -92,6 +98,7 @@ export interface Person {
   assignments?: RecruiterAssignment[];
   recruiter_contacts?: RecruiterContact[];
   status_history?: PersonStatusHistory[];
+  transfers?: any[];
 }
 
 export interface PersonEmail {
@@ -138,6 +145,11 @@ export interface Application {
   h1b_status?: string | null;
   current_stage: string;
   status?: string;
+  technology?: string | null;
+  screening_result?: string | null;
+  screening_applicant_id?: string | null;
+  source_batch_id?: string | null;
+  transfer_id?: string | null;
   minimum_salary?: number | null;
   maximum_salary?: number | null;
   currency_code?: string;
