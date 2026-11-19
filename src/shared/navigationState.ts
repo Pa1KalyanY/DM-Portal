@@ -21,7 +21,7 @@ export interface NavigationState {
 
   // Recruitment: LinkedIn Application Filter (8-Step Pipeline)
   slot?: string;
-  tab?: 'PASS' | 'MANUAL_REVIEW' | 'FAIL' | 'ALL';
+  tab?: 'PASS' | 'UNIQUE_PASSED' | 'ALL_PASSED' | 'MANUAL_REVIEW' | 'FAIL' | 'DUPLICATE' | 'ALL';
   batchId?: string;
   viewMode?: 'working_batch' | 'permanent_history';
   method?: 'upload' | 'paste';
@@ -37,7 +37,7 @@ export interface NavigationState {
   role?: string;
 
   // Recruitment: Periodic Reports
-  reportPeriod?: 'daily' | 'weekly' | 'monthly' | 'custom';
+  reportPeriod?: 'daily' | 'weekly' | 'monthly' | 'custom' | 'all';
   reportDate?: string;
   startDate?: string;
   endDate?: string;
@@ -124,7 +124,7 @@ export function readNavigationStateFromUrl(): Partial<NavigationState> {
     // Filter Workspace
     if (params.has('slot')) parsed.slot = params.get('slot') || 'ALL';
     const rawTab = params.get('tab');
-    if (rawTab && ['PASS', 'MANUAL_REVIEW', 'FAIL', 'ALL'].includes(rawTab)) {
+    if (rawTab && ['PASS', 'UNIQUE_PASSED', 'ALL_PASSED', 'MANUAL_REVIEW', 'FAIL', 'DUPLICATE', 'ALL'].includes(rawTab)) {
       parsed.tab = rawTab as any;
     }
     if (params.has('batchId')) parsed.batchId = params.get('batchId') || undefined;
@@ -436,5 +436,7 @@ export function clearUnsavedPasteDraft(): void {
   try {
     sessionStorage.removeItem(STORAGE_KEYS.UNSAVED_PASTE_TEXT);
     sessionStorage.removeItem(STORAGE_KEYS.UNSAVED_PASTE_LABEL);
+    localStorage.removeItem(STORAGE_KEYS.UNSAVED_PASTE_TEXT);
+    localStorage.removeItem(STORAGE_KEYS.UNSAVED_PASTE_LABEL);
   } catch {}
 }

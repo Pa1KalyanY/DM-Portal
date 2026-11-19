@@ -38,6 +38,7 @@ import { Person, CandidateStatus, Application, RecruiterContact, RecruiterAssign
 import { EditCandidateModal } from './EditCandidateModal';
 import { isPhoneNumber, extractCandidateNameFromEmail, cleanJobTitle, formatPureDigitsPhone } from '../../shared/normalization';
 import { classifyUrl, extractUrlsFromText } from '../../shared/urlClassifier';
+import { formatDateDisplay } from '../../shared/dateFormat';
 
 interface CandidateProfileViewProps {
   personId: string;
@@ -290,7 +291,7 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
   const applicationsCount = candidate.applications?.length || 0;
   const totalApplications = candidate.total_applications || applicationsCount || 1;
   const repeatApplications = candidate.repeat_applications !== undefined ? candidate.repeat_applications : Math.max(0, applicationsCount - 1);
-  
+
   const allRecruiterNames = new Set<string>();
   if (candidate.current_owner && candidate.current_owner !== 'Unassigned') allRecruiterNames.add(candidate.current_owner);
   if (candidate.first_assigned_recruiter) allRecruiterNames.add(candidate.first_assigned_recruiter);
@@ -306,16 +307,18 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
   const primaryApp = candidate.applications?.[0];
   const companyContext = candidate.current_company || primaryApp?.company || 'AaraTech';
   const roleDisplay = cleanJobTitle(candidate.current_title || primaryApp?.job_title) || 'Candidate Application';
-  const assignedDateDisplay = candidate.last_assignment_date || candidate.recruiter_assigned_date || primaryApp?.date_applied || candidate.created_at?.split('T')[0] || 'Not recorded';
-  const collectionDateDisplay = candidate.application_collected_date || (primaryApp as any)?.application_collected_date || primaryApp?.date_applied || candidate.created_at?.split('T')[0] || 'Not recorded';
-  const firstAppliedDate = candidate.first_applied_date || primaryApp?.date_applied || collectionDateDisplay;
-  const lastAppliedDate = candidate.last_applied_date || primaryApp?.date_applied || collectionDateDisplay;
-  const lastActivityDisplay = candidate.last_activity_at ? new Date(candidate.last_activity_at).toLocaleDateString() : 'N/A';
+  const rawAssignedDate = candidate.last_assignment_date || candidate.recruiter_assigned_date || primaryApp?.date_applied || candidate.created_at;
+  const assignedDateDisplay = formatDateDisplay(rawAssignedDate, 'Not recorded');
+  const rawCollectionDate = candidate.application_collected_date || (primaryApp as any)?.application_collected_date || primaryApp?.date_applied || candidate.created_at;
+  const collectionDateDisplay = formatDateDisplay(rawCollectionDate, 'Not recorded');
+  const firstAppliedDate = formatDateDisplay(candidate.first_applied_date || primaryApp?.date_applied || rawCollectionDate, 'Not recorded');
+  const lastAppliedDate = formatDateDisplay(candidate.last_applied_date || primaryApp?.date_applied || rawCollectionDate, 'Not recorded');
+  const lastActivityDisplay = formatDateDisplay(candidate.last_activity_at, 'N/A');
   const ownerDisplay = (!candidate.current_owner || candidate.current_owner === 'Unassigned' || candidate.current_owner === 'Adam') ? 'Needs assignment' : candidate.current_owner;
   const greenCardDisplay = candidate.green_card || (primaryApp as any)?.green_card || 'Not specified';
   const h1bDisplay = candidate.h1b_status || (primaryApp as any)?.h1b_status || 'Not specified';
-  const lastContactDateDisplay = candidate.last_contact_date || (uniqueRecruiterContacts[0]?.contact_date) || 'Not contacted';
-  const nextFollowUpDisplay = (uniqueRecruiterContacts.find(c => (c as any).next_follow_up) as any)?.next_follow_up || 'None recorded';
+  const lastContactDateDisplay = formatDateDisplay(candidate.last_contact_date || (uniqueRecruiterContacts[0]?.contact_date), 'Not contacted');
+  const nextFollowUpDisplay = formatDateDisplay((uniqueRecruiterContacts.find(c => (c as any).next_follow_up) as any)?.next_follow_up, 'None recorded');
 
   // Profile Completeness Score (Section 9)
   let completenessScore = 0;
@@ -550,11 +553,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
       {/* Toast Notification */}
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-50 px-4 py-2.5 rounded-xl shadow-lg border text-xs font-semibold flex items-center gap-2 ${
-            toast.type === 'success'
-              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-              : 'bg-rose-50 text-rose-800 border-rose-200'
-          }`}
+          className={`fixed top-4 right-4 z-50 px-4 py-2.5 rounded-xl shadow-lg border text-xs font-semibold flex items-center gap-2 ${toast.type === 'success'
+            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+            : 'bg-rose-50 text-rose-800 border-rose-200'
+            }`}
         >
           {toast.type === 'success' ? (
             <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -583,7 +585,7 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
 
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-slate-400 font-mono">
-            Last Activity: {candidate.last_activity_at ? new Date(candidate.last_activity_at).toLocaleDateString() : 'N/A'}
+            Last Activity: {formatDateDisplay(candidate.last_activity_at, 'N/A')}
           </span>
         </div>
       </div>
@@ -620,37 +622,34 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                 {candidate.person_id}
               </span>
               <span
-                className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                  companyContext === 'AaraTech'
-                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                    : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                }`}
+                className={`px-2 py-0.5 rounded text-[11px] font-bold ${companyContext === 'AaraTech'
+                  ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                  : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                  }`}
               >
                 {companyContext}
               </span>
               <span
-                className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                  candidate.current_status === 'Open'
-                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    : candidate.current_status === 'Review'
+                className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${candidate.current_status === 'Open'
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : candidate.current_status === 'Review'
                     ? 'bg-amber-50 text-amber-700 border border-amber-200'
                     : candidate.current_status === 'Contacted'
-                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                    : candidate.current_status === 'Follow-up'
-                    ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                    : 'bg-slate-100 text-slate-700 border border-slate-200'
-                }`}
+                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                      : candidate.current_status === 'Follow-up'
+                        ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                        : 'bg-slate-100 text-slate-700 border border-slate-200'
+                  }`}
               >
                 {candidate.current_status}
               </span>
               <span
-                className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                  candidate.gender === 'Male'
-                    ? 'bg-blue-50 text-blue-700 border-blue-200'
-                    : candidate.gender === 'Female'
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${candidate.gender === 'Male'
+                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                  : candidate.gender === 'Female'
                     ? 'bg-rose-50 text-rose-700 border-rose-200'
                     : 'bg-slate-50 text-slate-500 border-slate-200'
-                }`}
+                  }`}
               >
                 {candidate.gender || 'Unspecified'}
               </span>
@@ -777,11 +776,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('overview')}
-          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
-            activeTab === 'overview'
-              ? 'border-blue-600 text-blue-600 font-bold'
-              : 'border-transparent text-slate-600 hover:text-slate-900'
-          }`}
+          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${activeTab === 'overview'
+            ? 'border-blue-600 text-blue-600 font-bold'
+            : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
         >
           <Activity className="w-3.5 h-3.5" />
           <span>Overview</span>
@@ -790,11 +788,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('applications')}
-          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
-            activeTab === 'applications'
-              ? 'border-blue-600 text-blue-600 font-bold'
-              : 'border-transparent text-slate-600 hover:text-slate-900'
-          }`}
+          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${activeTab === 'applications'
+            ? 'border-blue-600 text-blue-600 font-bold'
+            : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
         >
           <Briefcase className="w-3.5 h-3.5" />
           <span>Applications</span>
@@ -806,11 +803,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('recruiter_history')}
-          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
-            activeTab === 'recruiter_history'
-              ? 'border-blue-600 text-blue-600 font-bold'
-              : 'border-transparent text-slate-600 hover:text-slate-900'
-          }`}
+          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${activeTab === 'recruiter_history'
+            ? 'border-blue-600 text-blue-600 font-bold'
+            : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
         >
           <UserCheck className="w-3.5 h-3.5" />
           <span>Recruiter History</span>
@@ -822,11 +818,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('feedback')}
-          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
-            activeTab === 'feedback'
-              ? 'border-blue-600 text-blue-600 font-bold'
-              : 'border-transparent text-slate-600 hover:text-slate-900'
-          }`}
+          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${activeTab === 'feedback'
+            ? 'border-blue-600 text-blue-600 font-bold'
+            : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
         >
           <MessageSquare className="w-3.5 h-3.5" />
           <span>Feedback</span>
@@ -838,11 +833,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('documents')}
-          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
-            activeTab === 'documents'
-              ? 'border-blue-600 text-blue-600 font-bold'
-              : 'border-transparent text-slate-600 hover:text-slate-900'
-          }`}
+          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${activeTab === 'documents'
+            ? 'border-blue-600 text-blue-600 font-bold'
+            : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
         >
           <FileText className="w-3.5 h-3.5" />
           <span>Documents &amp; Links</span>
@@ -851,11 +845,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('data_quality')}
-          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
-            activeTab === 'data_quality'
-              ? 'border-blue-600 text-blue-600 font-bold'
-              : 'border-transparent text-slate-600 hover:text-slate-900'
-          }`}
+          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${activeTab === 'data_quality'
+            ? 'border-blue-600 text-blue-600 font-bold'
+            : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
         >
           {dataQualityIssues.some(i => i.type === 'error') ? (
             <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
@@ -865,11 +858,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
           <span>Data Quality</span>
           {dataQualityIssues.length > 0 ? (
             <span
-              className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                dataQualityIssues.some(i => i.type === 'error')
-                  ? 'bg-rose-100 text-rose-700'
-                  : 'bg-amber-100 text-amber-800'
-              }`}
+              className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${dataQualityIssues.some(i => i.type === 'error')
+                ? 'bg-rose-100 text-rose-700'
+                : 'bg-amber-100 text-amber-800'
+                }`}
             >
               {dataQualityIssues.length}
             </span>
@@ -883,11 +875,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('source_history')}
-          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
-            activeTab === 'source_history'
-              ? 'border-blue-600 text-blue-600 font-bold'
-              : 'border-transparent text-slate-600 hover:text-slate-900'
-          }`}
+          className={`px-4 py-2.5 border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${activeTab === 'source_history'
+            ? 'border-blue-600 text-blue-600 font-bold'
+            : 'border-transparent text-slate-600 hover:text-slate-900'
+            }`}
         >
           <History className="w-3.5 h-3.5" />
           <span>Source History</span>
@@ -1063,15 +1054,14 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                 timelineEvents.map((evt) => (
                   <div key={evt.id} className="flex items-start gap-3 text-xs">
                     <div
-                      className={`w-2.5 h-2.5 rounded-full mt-1 shrink-0 ${
-                        evt.type === 'intake'
-                          ? 'bg-blue-600'
-                          : evt.type === 'application'
+                      className={`w-2.5 h-2.5 rounded-full mt-1 shrink-0 ${evt.type === 'intake'
+                        ? 'bg-blue-600'
+                        : evt.type === 'application'
                           ? 'bg-indigo-600'
                           : evt.type === 'assignment'
-                          ? 'bg-purple-600'
-                          : 'bg-emerald-600'
-                      }`}
+                            ? 'bg-purple-600'
+                            : 'bg-emerald-600'
+                        }`}
                     />
                     <div className="flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -1081,7 +1071,7 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                             {evt.badge}
                           </span>
                         )}
-                        <span className="text-slate-400 font-mono text-[11px]">{evt.date || 'Not dated'}</span>
+                        <span className="text-slate-400 font-mono text-[11px]">{formatDateDisplay(evt.date, 'Not dated')}</span>
                       </div>
                       {evt.details && (
                         <div className="text-slate-600 text-[11px] mt-0.5 whitespace-pre-wrap">{evt.details}</div>
@@ -1317,11 +1307,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                       </td>
                       <td className="py-2.5 px-3 font-semibold text-slate-900">
                         <span
-                          className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                            app.company === 'AaraTech'
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                              : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                          }`}
+                          className={`px-2 py-0.5 rounded text-[11px] font-bold ${app.company === 'AaraTech'
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                            }`}
                         >
                           {app.company}
                         </span>
@@ -1340,11 +1329,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                       </td>
                       <td className="py-2.5 px-3 font-semibold">
                         <span
-                          className={`px-2 py-0.5 rounded text-[10px] ${
-                            app.current_stage === 'PASS' || app.current_stage === 'Applied'
-                              ? 'bg-emerald-50 text-emerald-700'
-                              : 'bg-slate-100 text-slate-700'
-                          }`}
+                          className={`px-2 py-0.5 rounded text-[10px] ${app.current_stage === 'PASS' || app.current_stage === 'Applied'
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-slate-100 text-slate-700'
+                            }`}
                         >
                           {app.screening_result || app.current_stage || 'PASS'}
                         </span>
@@ -1423,11 +1411,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                       </td>
                       <td className="py-2.5 px-3">
                         <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            assign.status === 'Current'
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                              : 'bg-slate-100 text-slate-600 border border-slate-200'
-                          }`}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${assign.status === 'Current'
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}
                         >
                           {assign.status}
                         </span>
@@ -1501,7 +1488,7 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                     </div>
                     <div className="flex items-center gap-2 text-slate-500 font-mono text-[11px]">
                       <Calendar className="w-3 h-3 text-slate-400" />
-                      <span>{contact.contact_date || (contact as any).created_at?.split('T')[0] || 'Unknown Date'}</span>
+                      <span>{formatDateDisplay(contact.contact_date || (contact as any).created_at, 'Unknown Date')}</span>
                     </div>
                   </div>
 
@@ -1550,7 +1537,7 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                           </div>
                         );
                       }
-                    } catch {}
+                    } catch { }
                     return null;
                   })()}
 
@@ -1722,13 +1709,12 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-bold text-slate-900">Candidate Data Quality &amp; Integrity Audit</h3>
                 <span
-                  className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                    dataQualityIssues.length === 0
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      : dataQualityIssues.some(i => i.type === 'error')
+                  className={`px-2 py-0.5 rounded text-[11px] font-bold ${dataQualityIssues.length === 0
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : dataQualityIssues.some(i => i.type === 'error')
                       ? 'bg-rose-50 text-rose-700 border border-rose-200'
                       : 'bg-amber-50 text-amber-700 border border-amber-200'
-                  }`}
+                    }`}
                 >
                   {dataQualityIssues.length === 0
                     ? '100% Quality Clean'
@@ -1796,24 +1782,22 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
               {dataQualityIssues.map((issue) => (
                 <div
                   key={issue.id}
-                  className={`p-4 rounded-xl border space-y-2.5 transition-colors ${
-                    issue.type === 'error'
-                      ? 'bg-rose-50/60 border-rose-200 text-rose-950'
-                      : issue.type === 'warning'
+                  className={`p-4 rounded-xl border space-y-2.5 transition-colors ${issue.type === 'error'
+                    ? 'bg-rose-50/60 border-rose-200 text-rose-950'
+                    : issue.type === 'warning'
                       ? 'bg-amber-50/60 border-amber-200 text-amber-950'
                       : 'bg-blue-50/40 border-blue-200 text-blue-950'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
                     <div className="flex items-center gap-2">
                       <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                          issue.type === 'error'
-                            ? 'bg-rose-600 text-white'
-                            : issue.type === 'warning'
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${issue.type === 'error'
+                          ? 'bg-rose-600 text-white'
+                          : issue.type === 'warning'
                             ? 'bg-amber-600 text-white'
                             : 'bg-blue-600 text-white'
-                        }`}
+                          }`}
                       >
                         {issue.type}
                       </span>
@@ -2029,11 +2013,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                         <td className="py-2 px-3 text-slate-700 truncate max-w-[120px]" title={t.screening_applicant_id}>{t.screening_applicant_id}</td>
                         <td className="py-2 px-3 font-semibold">{t.company}</td>
                         <td className="py-2 px-3">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            t.transfer_status === 'TRANSFERRED'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : 'bg-rose-50 text-rose-700 border border-rose-200'
-                          }`}>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${t.transfer_status === 'TRANSFERRED'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-rose-50 text-rose-700 border border-rose-200'
+                            }`}>
                             {t.transfer_status}
                           </span>
                         </td>
@@ -2120,11 +2103,10 @@ export const CandidateProfileView: React.FC<CandidateProfileViewProps> = ({
                       key={name}
                       type="button"
                       onClick={() => setReassignRecruiterName(name)}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all text-center ${
-                        reassignRecruiterName === name
-                          ? 'bg-blue-50 border-blue-500 text-blue-700'
-                          : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                      }`}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all text-center ${reassignRecruiterName === name
+                        ? 'bg-blue-50 border-blue-500 text-blue-700'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                        }`}
                     >
                       {name}
                     </button>

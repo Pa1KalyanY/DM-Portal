@@ -541,23 +541,26 @@ export function sanitizeContactNumber(rawPhone: string | number | null | undefin
 export interface GoogleSheetsRow {
   'Date': string;
   'Name': string;
-  'Contact Number': string;
+  'ContactNumber': string;
   'Email I\'d': string;
   'Job Role': string;
   'GREEN CARD/ US-C': string;
   'H1B-Y/N': string;
-  'LinkedIn Profile Link': string;
+  'Resume Link': string;
+  // Backwards compatibility aliases
+  'Contact Number'?: string;
+  'LinkedIn Profile Link'?: string;
 }
 
 export const GOOGLE_SHEETS_COLUMNS = [
   'Date',
   'Name',
-  'Contact Number',
+  'ContactNumber',
   "Email I'd",
   'Job Role',
   'GREEN CARD/ US-C',
   'H1B-Y/N',
-  'LinkedIn Profile Link',
+  'Resume Link',
 ] as const;
 
 /**
@@ -714,34 +717,42 @@ export function normalizeJobRole(rawRole: string | undefined | null, fallbackCon
   return rawRole?.trim() || '';
 }
 
+import { formatDateDisplay } from './dateFormat';
+
 export const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /**
  * Formats a Date object or string into standard DD-MMM-YYYY (e.g. 15-Oct-2026, 21-Oct-2026)
+ * Never silently substitutes today's date if dateInput is missing.
  */
-export function formatDayMonthYear(dateInput?: string | Date): string {
-  if (!dateInput) return getTodayDateString();
-  const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
-  if (isNaN(d.getTime())) {
-    const str = String(dateInput).trim();
-    if (/^\d{1,2}-[A-Za-z]{3}-\d{4}$/.test(str)) return str;
-    return getTodayDateString();
-  }
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = MONTH_NAMES[d.getMonth()];
-  const year = d.getFullYear();
-  return `${day}-${month}-${year}`;
+export function formatDayMonthYear(dateInput?: string | Date, fallback: string = ''): string {
+  if (!dateInput) return fallback;
+  return formatDateDisplay(dateInput, fallback);
 }
 
 /**
  * Returns today's date string formatted as DD-MMM-YYYY (e.g. 15-Oct-2026, 21-Oct-2026)
+ * Anchored to authoritative recruitment processing timezone (America/New_York - EST/EDT)
  */
 export function getTodayDateString(): string {
-  const d = new Date();
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = MONTH_NAMES[d.getMonth()];
-  const year = d.getFullYear();
-  return `${day}-${month}-${year}`;
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const ymd = formatter.format(new Date()); // YYYY-MM-DD
+    const [year, monthNum, day] = ymd.split('-');
+    const month = MONTH_NAMES[parseInt(monthNum, 10) - 1];
+    return `${day}-${month}-${year}`;
+  } catch {
+    const d = new Date();
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = MONTH_NAMES[d.getMonth()];
+    const year = d.getFullYear();
+    return `${day}-${month}-${year}`;
+  }
 }
 
 export function formatGoogleSheetsRow(
@@ -810,17 +821,20 @@ export function formatGoogleSheetsRow(
   return {
     'Date': dateValue,
     'Name': applicant.fullName || '',
-    'Contact Number': contactNum,
+    'ContactNumber': contactNum,
     "Email I'd": applicant.email || raw["Email I'd"] || raw['Email Id'] || raw['Email'] || raw['Email Address'] || '',
     'Job Role': normalizedRole,
     'GREEN CARD/ US-C': gcVal,
     'H1B-Y/N': h1bVal,
+    'Resume Link': profileLink,
+    // Backwards compatibility aliases
+    'Contact Number': contactNum,
     'LinkedIn Profile Link': profileLink,
   };
 }
 
-export function generateGoogleSheetsTsv(rows: GoogleSheetsRow[], includeHeaders: boolean = false): string {
-  const sanitizeCell = (val: string) => String(val || '').replace(/[\t\r\n]+/g, ' ').trim();
+export function generateGoogleSheetsTsv(rows: GoogleSheetsRow[], includeHeaders: boolean = true): string {
+  const sanitizeCell = (val: any) => String(val ?? '').replace(/[\t\r\n]+/g, ' ').trim();
   const lines: string[] = [];
 
   if (includeHeaders) {
@@ -831,12 +845,12 @@ export function generateGoogleSheetsTsv(rows: GoogleSheetsRow[], includeHeaders:
     const line = [
       sanitizeCell(row['Date']),
       sanitizeCell(row['Name']),
-      sanitizeCell(row['Contact Number']),
+      sanitizeCell(row['ContactNumber'] || row['Contact Number']),
       sanitizeCell(row["Email I'd"]),
       sanitizeCell(row['Job Role']),
       sanitizeCell(row['GREEN CARD/ US-C']),
       sanitizeCell(row['H1B-Y/N']),
-      sanitizeCell(row['LinkedIn Profile Link']),
+      sanitizeCell(row['Resume Link'] || row['LinkedIn Profile Link']),
     ].join('\t');
     lines.push(line);
   }

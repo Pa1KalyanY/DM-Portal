@@ -1,7 +1,42 @@
 import { Applicant, AuditLogEntry, DashboardStats, ImportRecord, PaginatedResult, PaginationParams, Recruiter, ScreeningRule } from '../types';
 import { Person } from '../types/masterDatabase';
 
+// Optional Remote Backend Base URL for split deployments (e.g. Vercel frontend + Render/Railway backend)
+const API_BASE = ((import.meta as any).env?.VITE_API_URL || '').replace(/\/$/, '');
+if (typeof window !== 'undefined' && API_BASE) {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = function(input: RequestInfo | URL, init?: RequestInit) {
+    if (typeof input === 'string' && input.startsWith('/api')) {
+      return originalFetch(`${API_BASE}${input}`, init);
+    }
+    return originalFetch(input, init);
+  };
+}
+
 export const api = {
+  // 0. Authoritative Database Health Probe
+  getDatabaseHealth: async (company: string = 'ClinisolTech') => {
+    const res = await fetch(`/api/health?company=${company}`, {
+      headers: { 'x-company': company },
+    });
+    if (!res.ok) throw new Error('Database offline or unreachable');
+    return res.json() as Promise<{
+      status: 'ONLINE' | 'OFFLINE';
+      company: string;
+      connected: boolean;
+      dbType: string;
+      latencyMs: number;
+      applicantCount: number;
+      masterPeopleCount: number;
+      masterAppCount: number;
+      importCount: number;
+      lastSuccessfulCheck: string;
+      lastSuccessfulRead: string;
+      lastSuccessfulWrite: string;
+      syncStatus: string;
+    }>;
+  },
+
   // 1. Pre-validate files before processing
   validateFiles: async (files: File[]) => {
     const formData = new FormData();
@@ -215,6 +250,7 @@ export const api = {
     if (params.jobTitle) query.set('jobTitle', params.jobTitle);
     if (params.company) query.set('company', params.company);
     if (params.batchId) query.set('batchId', params.batchId);
+    if (params.viewMode) query.set('viewMode', params.viewMode);
     if (params.applicationDate) query.set('applicationDate', params.applicationDate);
     if (params.startDate) query.set('startDate', params.startDate);
     if (params.endDate) query.set('endDate', params.endDate);
@@ -251,6 +287,7 @@ export const api = {
     if (params.jobTitle) query.set('jobTitle', params.jobTitle);
     if (params.company) query.set('company', params.company);
     if (params.batchId) query.set('batchId', params.batchId);
+    if (params.viewMode) query.set('viewMode', params.viewMode);
     if (params.applicationDate) query.set('applicationDate', params.applicationDate);
     if (params.startDate) query.set('startDate', params.startDate);
     if (params.endDate) query.set('endDate', params.endDate);
@@ -272,6 +309,7 @@ export const api = {
     const query = new URLSearchParams();
     if (params.company) query.set('company', params.company);
     if (params.batchId) query.set('batchId', params.batchId);
+    if (params.viewMode) query.set('viewMode', params.viewMode);
     if (params.applicationDate) query.set('applicationDate', params.applicationDate);
     if (params.startDate) query.set('startDate', params.startDate);
     if (params.endDate) query.set('endDate', params.endDate);
@@ -287,7 +325,7 @@ export const api = {
 
     const res = await fetch(`/api/applicants/tab-counts?${query.toString()}`, { headers });
     if (!res.ok) throw new Error('Failed to load tab counts');
-    return res.json() as Promise<{ pass: number; fail: number; review: number; all: number }>;
+    return res.json() as Promise<{ pass: number; allPassed: number; fail: number; review: number; duplicate: number; all: number; uniquePassed: number }>;
   },
 
   // 4D. Distinct Portal Ingestion Dates for Workspace
@@ -482,7 +520,8 @@ export const api = {
     batchId: string,
     company: string,
     purgeRecords = false,
-    user = 'Recruiter Admin'
+    user = 'Recruiter Admin',
+    applicationDate?: string
   ) => {
     const res = await fetch('/api/clear-current-batch', {
       method: 'POST',
@@ -490,7 +529,7 @@ export const api = {
         'Content-Type': 'application/json',
         'x-company': company,
       },
-      body: JSON.stringify({ batchId, company, purgeRecords, user }),
+      body: JSON.stringify({ batchId, company, purgeRecords, user, applicationDate }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: 'Failed to clear working batch' }));
@@ -602,10 +641,10 @@ export const api = {
     return res.json() as Promise<{ success: boolean; count: number; message: string }>;
   },
 
-  // 9E. Periodic Reports & Analytics (Daily, Weekly, Monthly, Custom)
+  // 9E. Periodic Reports & Analytics (Daily, Weekly, Monthly, All-Time, Custom)
   getReportAnalytics: async (
     company: string,
-    period: 'daily' | 'weekly' | 'monthly' | 'custom' = 'daily',
+    period: 'daily' | 'weekly' | 'monthly' | 'custom' | 'all' = 'daily',
     date?: string,
     startDate?: string,
     endDate?: string
@@ -619,6 +658,122 @@ export const api = {
     });
     if (!res.ok) throw new Error('Failed to load report analytics');
     return res.json() as Promise<any>;
+  },
+
+  // 9E-2. Report Drilldown Records
+  getReportDrilldownRecords: async (params: {
+    company: string;
+    filterType?: string;
+    filterValue?: string;
+    period?: string;
+    date?: string;
+    startDate?: string;
+    endDate?: string;
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  }) => {
+    const query = new URLSearchParams();
+    query.set('company', params.company);
+    if (params.filterType) query.set('filterType', params.filterType);
+    if (params.filterValue) query.set('filterValue', params.filterValue);
+    if (params.period) query.set('period', params.period);
+    if (params.date) query.set('date', params.date);
+    if (params.startDate) query.set('startDate', params.startDate);
+    if (params.endDate) query.set('endDate', params.endDate);
+    if (params.search) query.set('search', params.search);
+    if (params.page) query.set('page', params.page.toString());
+    if (params.pageSize) query.set('pageSize', params.pageSize.toString());
+
+    const res = await fetch(`/api/reports/drilldown-records?${query.toString()}`, {
+      headers: { 'x-company': params.company },
+    });
+    if (!res.ok) throw new Error('Failed to load drilldown records');
+    return res.json() as Promise<{
+      success: boolean;
+      total: number;
+      page: number;
+      pageSize: number;
+      records: Array<{
+        id: string;
+        fullName: string;
+        email: string;
+        phone: string;
+        location: string;
+        jobId: string;
+        jobTitle: string;
+        applicationDate: string;
+        effectiveResult: string;
+        isDuplicate: number;
+        masterPersonId?: string | null;
+        gender?: string | null;
+      }>;
+    }>;
+  },
+
+  // 9E-3. Month Comparison & Available Reporting Months
+  getMonthComparison: async (company: string = 'ClinisolTech', monthA: string = '2026-10', monthB: string = '2026-09') => {
+    const query = new URLSearchParams({ company, monthA, monthB });
+    const res = await fetch(`/api/reports/month-comparison?${query.toString()}`, {
+      headers: { 'x-company': company },
+    });
+    if (!res.ok) throw new Error('Failed to load month comparison');
+    return res.json() as Promise<{
+      success: boolean;
+      monthA: any;
+      monthB: any;
+      comparison: {
+        deltaTotal: number;
+        deltaTotalPct: number;
+        deltaPassed: number;
+        deltaPassedPct: number;
+        deltaPassRate: number;
+        deltaDuplicates: number;
+        deltaFailed?: number;
+        deltaUniqueCandidates?: number;
+        deltaMalePassed?: number;
+        deltaFemalePassed?: number;
+      };
+      techComparison: Array<{
+        technology: string;
+        monthA: { total: number; passed: number; passRate: number; formattedPassed?: string; slots?: any[] };
+        monthB: { total: number; passed: number; passRate: number; formattedPassed?: string; slots?: any[] };
+        deltaTotal: number;
+        deltaTotalPct: number;
+        deltaPassed: number;
+      }>;
+      locationsComparison?: Array<{
+        name: string;
+        monthA: number;
+        monthB: number;
+        delta: number;
+      }>;
+      allMonthsTimeline?: Array<any>;
+    }>;
+  },
+
+  getAvailableReportingMonths: async (company: string = 'ClinisolTech') => {
+    const query = new URLSearchParams({ company });
+    const res = await fetch(`/api/reports/available-months?${query.toString()}`, {
+      headers: { 'x-company': company },
+    });
+    if (!res.ok) throw new Error('Failed to load available reporting months');
+    return res.json() as Promise<{
+      success: boolean;
+      months: Array<{ month: string; label: string; total: number }>;
+    }>;
+  },
+
+  getMonthSummary: async (company: string = 'ClinisolTech', month: string = '2026-10') => {
+    const query = new URLSearchParams({ company, month });
+    const res = await fetch(`/api/reports/month-summary?${query.toString()}`, {
+      headers: { 'x-company': company },
+    });
+    if (!res.ok) throw new Error('Failed to load month summary');
+    return res.json() as Promise<{
+      success: boolean;
+      summary: any;
+    }>;
   },
 
   // 9F. Check Duplicate Candidates Against Master DB
@@ -1191,11 +1346,16 @@ export const api = {
     return res.json() as Promise<{
       success: boolean;
       totalPeople: number;
+      totalCandidates?: number;
       totalApplications: number;
       activeCandidates: number;
       unlinkedApplications: number;
       statusBreakdown: Record<string, number>;
       genderBreakdown: Record<string, number>;
+      byCompany?: {
+        AaraTech: number;
+        ClinisolTech: number;
+      };
     }>;
   },
 
@@ -1392,10 +1552,16 @@ export const api = {
     return res.json() as Promise<{ success: boolean; message: string }>;
   },
 
-  clearAllMasterCandidates: async (company: string = 'all', user = 'Recruiter Admin') => {
+  clearAllMasterCandidates: async (company: 'AaraTech' | 'ClinisolTech', user = 'Recruiter Admin') => {
+    if (!company || (company !== 'AaraTech' && company !== 'ClinisolTech')) {
+      throw new Error(`Strict Company Isolation: company must be explicitly 'AaraTech' or 'ClinisolTech' (received: ${company}).`);
+    }
     const res = await fetch('/api/master-candidates/clear-all', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-company': company,
+      },
       body: JSON.stringify({ company, user }),
     });
     if (!res.ok) {
@@ -1405,17 +1571,122 @@ export const api = {
     return res.json() as Promise<{ success: boolean; message: string }>;
   },
 
-  upsertMasterCandidatesBatch: async (people: Person[], importRecord?: any) => {
-    const res = await fetch('/api/master-candidates/batch-upsert', {
+  createMasterImportJob: async (job: { id: string; company: string; sourceFile?: string; sheetName?: string; totalRows?: number }) => {
+    const res = await fetch('/api/master-candidates/import-jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ people, importRecord }),
+      body: JSON.stringify(job),
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to batch upsert candidates' }));
-      throw new Error(err.error || 'Failed to batch upsert candidates');
+      const err = await res.json().catch(() => ({ error: 'Failed to create import job' }));
+      throw new Error(err.error || 'Failed to create import job');
     }
-    return res.json() as Promise<{ success: boolean; count: number }>;
+    return res.json();
+  },
+
+  getMasterImportJob: async (jobId: string) => {
+    const res = await fetch(`/api/master-candidates/import-jobs/${encodeURIComponent(jobId)}`);
+    if (!res.ok) return null;
+    return res.json();
+  },
+
+  getMasterImportJobs: async (company?: string) => {
+    const url = company ? `/api/master-candidates/import-jobs?company=${encodeURIComponent(company)}` : '/api/master-candidates/import-jobs';
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    return res.json();
+  },
+
+  getMasterImportResumeInfo: async (jobId: string) => {
+    const res = await fetch(`/api/master-candidates/import-jobs/${encodeURIComponent(jobId)}/resume`);
+    if (!res.ok) return null;
+    return res.json();
+  },
+
+  getMasterImportErrors: async (jobId: string) => {
+    const res = await fetch(`/api/master-candidates/import-jobs/${encodeURIComponent(jobId)}/errors`);
+    if (!res.ok) return [];
+    return res.json();
+  },
+
+  completeMasterImportJob: async (jobId: string, status = 'Completed', errorSummary?: string) => {
+    const res = await fetch(`/api/master-candidates/import-jobs/${encodeURIComponent(jobId)}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, errorSummary }),
+    });
+    if (!res.ok) return null;
+    return res.json();
+  },
+
+  upsertMasterCandidatesBatch: async (
+    people: Person[],
+    importRecord?: any,
+    jobOptions?: {
+      jobId?: string;
+      onChunkProgress?: (chunkNum: number, totalChunks: number, processedRows: number) => void;
+    }
+  ) => {
+    if (!people || people.length === 0) return { success: true, count: 0, errors: [] };
+    const CHUNK_SIZE = 250;
+    let totalUpserted = 0;
+    const allErrors: any[] = [];
+    const totalChunks = Math.ceil(people.length / CHUNK_SIZE);
+
+    for (let i = 0; i < people.length; i += CHUNK_SIZE) {
+      const chunkNum = Math.floor(i / CHUNK_SIZE) + 1;
+      const chunk = people.slice(i, i + CHUNK_SIZE);
+      const startRow = i + 1;
+      const endRow = Math.min(i + CHUNK_SIZE, people.length);
+      let attempts = 0;
+      let success = false;
+      let lastErr: any = null;
+
+      while (attempts < 3 && !success) {
+        attempts++;
+        try {
+          const res = await fetch('/api/master-candidates/batch-upsert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              people: chunk,
+              importRecord: i === 0 ? importRecord : undefined,
+              options: {
+                jobId: jobOptions?.jobId || importRecord?.id,
+                sourceFile: importRecord?.file_name,
+                sheetName: importRecord?.sheet_name || 'Pasted_Leads',
+                batchNumber: chunkNum,
+                startRow,
+                endRow,
+              },
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: `Failed to batch upsert candidates chunk ${chunkNum}` }));
+            throw new Error(err.error || `Failed to upsert candidates chunk ${chunkNum}`);
+          }
+          const data = await res.json();
+          totalUpserted += data.upserted !== undefined ? data.upserted : (data.count || chunk.length);
+          if (data.errors && Array.isArray(data.errors) && data.errors.length > 0) {
+            allErrors.push(...data.errors);
+          }
+          success = true;
+          if (jobOptions?.onChunkProgress) {
+            jobOptions.onChunkProgress(chunkNum, totalChunks, endRow);
+          }
+        } catch (err: any) {
+          lastErr = err;
+          if (attempts >= 3) {
+            console.error(`[API Client] Chunk ${chunkNum}/${totalChunks} encountered persistent error after 3 attempts:`, err);
+            allErrors.push({ chunk: chunkNum, error: err.message || 'Network / Database timeout' });
+            break;
+          }
+          // Exponential backoff wait before retrying chunk
+          await new Promise(r => setTimeout(r, 600 * attempts));
+        }
+      }
+    }
+    return { success: allErrors.length === 0, count: totalUpserted, errors: allErrors };
   },
 };
 

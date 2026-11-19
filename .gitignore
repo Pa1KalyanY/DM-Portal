@@ -28,7 +28,12 @@ dist-ssr
 *.bak
 *.db.pre_*
 *.db.*backup*
+*backup*.db
 *.phase2_backup
+*.db-wal
+*.db-shm
+backups/
+test_check_*.ts
 scratch/
 
 # Environment files

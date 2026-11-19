@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { dbService } from '../../services/masterDbService';
 import { Person, MergeHistory, CompanyName } from '../../types/masterDatabase';
+import { formatDateDisplay } from '../../shared/dateFormat';
 
 export const MergeCandidatesView: React.FC = () => {
   const [selectedCompany, setSelectedCompany] = useState<CompanyName>('AaraTech');
@@ -296,7 +297,7 @@ export const MergeCandidatesView: React.FC = () => {
                         {h.merged_by}
                       </td>
                       <td className="py-3 px-4 text-xs font-mono text-slate-500">
-                        {new Date(h.merged_at).toLocaleDateString()}
+                        {formatDateDisplay(h.merged_at)}
                       </td>
                       <td className="py-3 px-4">
                         {h.can_unmerge ? (

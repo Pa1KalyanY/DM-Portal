@@ -18,6 +18,7 @@ import {
 import { DashboardStats } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import { NavTab } from '../components/Sidebar';
+import { formatDateDisplay } from '../shared/dateFormat';
 
 interface DashboardViewProps {
   stats: DashboardStats | null;
@@ -424,7 +425,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         </span>
                       </div>
                       <span className="text-[10px] text-slate-500 flex-shrink-0">
-                        {new Date(imp.uploadedAt).toLocaleDateString()}
+                        {formatDateDisplay(imp.uploadedAt)}
                       </span>
                     </div>
                     <div className="mt-1 text-xs text-slate-600 font-medium truncate">

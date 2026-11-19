@@ -27,6 +27,7 @@ import {
 import { dbService } from '../../services/masterDbService';
 import { PossibleMatch, Person, CompanyName } from '../../types/masterDatabase';
 import { GeminiMatchModal } from './GeminiMatchModal';
+import { formatDateDisplay } from '../../shared/dateFormat';
 
 interface PossibleMatchesViewProps {
   onSelectCandidate: (personId: string) => void;
@@ -505,7 +506,7 @@ export const PossibleMatchesView: React.FC<PossibleMatchesViewProps> = ({
                   </div>
 
                   <div className="text-xs text-slate-400 font-mono">
-                    Detected: {new Date(match.created_at).toLocaleDateString()}
+                    Detected: {formatDateDisplay(match.created_at, '—')}
                   </div>
                 </div>
 

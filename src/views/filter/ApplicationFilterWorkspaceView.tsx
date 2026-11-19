@@ -5,6 +5,7 @@ import {
   Calendar,
   Briefcase,
   CheckCircle2,
+  CheckCheck,
   XCircle,
   AlertTriangle,
   Copy,
@@ -41,7 +42,8 @@ import { Applicant, ImportRecord, Recruiter, NameMatchCategory } from '../../typ
 import { api } from '../../api/client';
 import { indexedDBService } from '../../services/indexedDb';
 import { ApplicantDetailModal } from '../ApplicantDetailModal';
-import { normalizeJobRole, formatDayMonthYear } from '../../shared/columnMapper';
+import { normalizeJobRole, formatDayMonthYear, getTodayDateString } from '../../shared/columnMapper';
+import { formatDateDisplay, getTodayYMD } from '../../shared/dateFormat';
 import {
   readNavigationStateFromUrl,
   readPersistedBackupState,
@@ -69,7 +71,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
   }, [activeCompany]);
 
   // Step 1 Controls: Portal Ingestion Date (selected for processing new uploads/pastes)
-  const [selectedDate, setSelectedDate] = useState<string>(() => initialNavState.date || new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState<string>(() => initialNavState.date || getTodayYMD());
   const [selectedJobSlot, setSelectedJobSlot] = useState<string>(initialJobSlot);
   const [baselineJobs, setBaselineJobs] = useState<Array<{ jobId: string; jobTitle: string; total?: number }>>([]);
   const [recruiters, setRecruiters] = useState<Recruiter[]>([]);
@@ -88,7 +90,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
   const [viewMode, setViewMode] = useState<'working_batch' | 'permanent_history'>(() => initialNavState.viewMode || 'working_batch');
 
   // Step 5: Passed, Failed, Manual Review Tabs
-  const [activeTab, setActiveTab] = useState<'PASS' | 'MANUAL_REVIEW' | 'FAIL' | 'ALL'>(() => initialNavState.tab || 'PASS');
+  const [activeTab, setActiveTab] = useState<'PASS' | 'UNIQUE_PASSED' | 'ALL_PASSED' | 'MANUAL_REVIEW' | 'FAIL' | 'DUPLICATE' | 'ALL'>(() => (initialNavState.tab as any) || 'PASS');
 
   // Applicants & Pagination
   const [applicants, setApplicants] = useState<Applicant[]>([]);
@@ -112,6 +114,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
   const [selectedRecruiter, setSelectedRecruiter] = useState<string>('');
   const [isDistributing, setIsDistributing] = useState<boolean>(false);
   const [copySuccessMessage, setCopySuccessMessage] = useState<string | null>(null);
+  const [includeHeadersInCopy, setIncludeHeadersInCopy] = useState<boolean>(true);
 
   // Detail Modal & Override State
   const [detailApplicant, setDetailApplicant] = useState<Applicant | null>(null);
@@ -121,6 +124,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
 
   // Clear Working Batch Modal
   const [isClearBatchModalOpen, setIsClearBatchModalOpen] = useState<boolean>(false);
+  const [batchToClear, setBatchToClear] = useState<string>('ALL_SLOTS');
   const [isPurgingRecords, setIsPurgingRecords] = useState<boolean>(false);
 
   // Clear All Applications Modal (Company Scoped Fresh Start)
@@ -165,6 +169,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
 
   // File Upload State
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pasteTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -242,7 +247,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
       viewMode,
       method: importMethod,
       date: selectedDate,
-      resultsDate: resultsDate !== 'ALL' ? resultsDate : undefined,
+      resultsDate: viewMode === 'permanent_history' && resultsDate !== 'ALL' ? resultsDate : undefined,
       historyStartDate: historyStartDate || undefined,
       historyEndDate: historyEndDate || undefined,
       search: searchQuery || undefined,
@@ -271,40 +276,40 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
     roleFilter,
   ]);
 
+  // Load Baseline Jobs, Recruiters, Batches, and Ingestion Dates
+  const loadMeta = async (companyOverride?: CompanyName) => {
+    const targetCompany = companyOverride || activeCompany;
+    try {
+      const [jobsData, recruitersData, importsData, datesData] = await Promise.all([
+        api.getJobs(targetCompany),
+        api.getRecruiters(targetCompany),
+        api.getImports(targetCompany, 50),
+        api.getIngestionDates(targetCompany),
+      ]);
+      setBaselineJobs(jobsData);
+      setRecruiters(recruitersData);
+      setBatchHistory(importsData);
+      setAvailableIngestionDates(datesData.dates || []);
+
+      // Verify if current activeBatchId exists in this company's active working imports
+      const activeBatches = importsData.filter(b => b.activeWorkingBatch !== false);
+      const batchStillValid = !activeBatchId || activeBatchId === 'ALL' || activeBatches.some(b => b.id === activeBatchId);
+      if (!batchStillValid) {
+        setActiveBatchId('');
+      }
+    } catch (err) {
+      console.error('Failed to load filter metadata:', err);
+    }
+  };
+
   // Load Baseline Jobs, Recruiters, Batches, and Ingestion Dates whenever active company changes
   useEffect(() => {
-    let isMounted = true;
-    async function loadMeta() {
-      try {
-        const [jobsData, recruitersData, importsData, datesData] = await Promise.all([
-          api.getJobs(activeCompany),
-          api.getRecruiters(activeCompany),
-          api.getImports(activeCompany, 50),
-          api.getIngestionDates(activeCompany),
-        ]);
-        if (isMounted) {
-          setBaselineJobs(jobsData);
-          setRecruiters(recruitersData);
-          setBatchHistory(importsData);
-          setAvailableIngestionDates(datesData.dates || []);
-          
-          // Verify if current activeBatchId exists in this company's imports or is 'ALL'
-          const batchStillValid = activeBatchId === 'ALL' || importsData.some(b => b.id === activeBatchId);
-          if (!batchStillValid && importsData.length > 0) {
-            setActiveBatchId(importsData[0].id);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load filter metadata:', err);
-      }
-    }
-    loadMeta();
-    return () => { isMounted = false; };
+    loadMeta(activeCompany);
   }, [activeCompany]);
 
   interface LoadApplicantsOverrides {
     batchId?: string;
-    tab?: 'PASS' | 'MANUAL_REVIEW' | 'FAIL' | 'ALL';
+    tab?: 'PASS' | 'UNIQUE_PASSED' | 'ALL_PASSED' | 'MANUAL_REVIEW' | 'FAIL' | 'DUPLICATE' | 'ALL';
     page?: number;
     pageSize?: number;
     jobSlot?: string;
@@ -346,7 +351,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
         ? effectiveBatchId
         : undefined;
 
-      const appDateToQuery = effectiveResultsDate && effectiveResultsDate !== 'ALL'
+      const appDateToQuery = effectiveViewMode === 'permanent_history' && effectiveResultsDate && effectiveResultsDate !== 'ALL'
         ? effectiveResultsDate
         : undefined;
 
@@ -359,6 +364,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
         status: effectiveTab === 'ALL' ? undefined : effectiveTab,
         company: effectiveCompany,
         batchId: batchToQuery,
+        viewMode: effectiveViewMode,
         applicationDate: appDateToQuery,
         startDate: startDateToQuery,
         endDate: endDateToQuery,
@@ -405,12 +411,15 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
     roleFilter,
   ]);
 
-  // Tab Badge Counts for Current Scope (Exact matching counts across Passed, Manual Review, Failed, All Records)
-  const [tabCounts, setTabCounts] = useState<{ pass: number; fail: number; review: number; all: number }>({
+  // Tab Badge Counts for Current Scope (Exact matching counts across Passed, Manual Review, Failed, Duplicate, All Records)
+  const [tabCounts, setTabCounts] = useState<{ pass: number; allPassed?: number; fail: number; review: number; duplicate: number; all: number; uniquePassed?: number }>({
     pass: 0,
+    allPassed: 0,
     fail: 0,
     review: 0,
+    duplicate: 0,
     all: 0,
+    uniquePassed: 0,
   });
 
   const fetchTabCounts = async (overrides?: LoadApplicantsOverrides) => {
@@ -429,8 +438,9 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
 
       const counts = await api.getApplicantTabCounts({
         company: effectiveCompany,
+        viewMode: effectiveViewMode,
         batchId: effectiveViewMode === 'working_batch' && effectiveBatchId && effectiveBatchId !== 'ALL' ? effectiveBatchId : undefined,
-        applicationDate: effectiveResultsDate && effectiveResultsDate !== 'ALL' ? effectiveResultsDate : undefined,
+        applicationDate: effectiveViewMode === 'permanent_history' && effectiveResultsDate && effectiveResultsDate !== 'ALL' ? effectiveResultsDate : undefined,
         startDate: effectiveViewMode === 'permanent_history' && effectiveHStart ? effectiveHStart : undefined,
         endDate: effectiveViewMode === 'permanent_history' && effectiveHEnd ? effectiveHEnd : undefined,
         jobId: effectiveSlot !== 'ALL' ? effectiveSlot : undefined,
@@ -493,15 +503,18 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
     }
   };
 
-  // Listen to cross-component workspace updates
+  // Listen to cross-component workspace updates (including auto-reconnect recovery)
   useEffect(() => {
     const handleRemoteUpdate = () => {
+      if (baselineJobs.length === 0 || batchHistory.length === 0) {
+        loadMeta();
+      }
       loadApplicants();
       fetchTabCounts();
     };
     window.addEventListener('workspace-data-updated', handleRemoteUpdate);
     return () => window.removeEventListener('workspace-data-updated', handleRemoteUpdate);
-  }, [activeCompany, activeBatchId, viewMode, activeTab, page, pageSize, selectedJobSlot, selectedDate, searchQuery, genderFilter, nameMatchFilter, roleFilter]);
+  }, [activeCompany, activeBatchId, viewMode, activeTab, page, pageSize, selectedJobSlot, selectedDate, resultsDate, historyStartDate, historyEndDate, searchQuery, genderFilter, nameMatchFilter, roleFilter, baselineJobs.length, batchHistory.length]);
 
   // Handle Save Job Slot Rename
   const handleSaveJobSlotRename = async () => {
@@ -550,6 +563,10 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
       setViewMode('working_batch');
       setResultsDate(selectedDate);
       setActiveTab('PASS');
+      setGenderFilter('ALL');
+      setNameMatchFilter('ALL');
+      setRoleFilter('ALL');
+      setSearchQuery('');
       setPage(1);
 
       await refreshAllWorkspaceData({
@@ -557,6 +574,10 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
         resultsDate: selectedDate,
         viewMode: 'working_batch',
         tab: 'PASS',
+        gender: 'ALL',
+        nameMatch: 'ALL',
+        role: 'ALL',
+        search: '',
         page: 1,
       });
 
@@ -600,8 +621,8 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
 
   // Direct Paste: Full Recruitment Ingestion Pipeline
   const handleImportPastedData = async () => {
-    if (!pastedText.trim() || !pastePreview || pastePreview.validRows === 0) {
-      alert('Please preview and validate pasted applications before importing.');
+    if (!pastedText.trim()) {
+      alert('Please paste application rows from Excel or Google Sheets into the box above before importing.');
       return;
     }
     setIsImportingPaste(true);
@@ -621,28 +642,40 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
         defaultJobTitle: selectedJobObj?.jobTitle,
       });
 
-      // Refresh imports history & set new active batch & align results date to the imported processing date
-      setActiveBatchId(res.importRecord.id);
-      setViewMode('working_batch');
-      setResultsDate(selectedDate);
-      setActiveTab('PASS');
-      setPage(1);
-
-      setPasteImportSummary(res.summary);
+      // 1. Immediately clear the paste textarea, draft storage, and preview so user can upload next batch
       setPastedText('');
       setPastePreview(null);
       setPasteBatchLabel('');
       clearUnsavedPasteDraft();
+      if (pasteTextareaRef.current) {
+        pasteTextareaRef.current.value = '';
+      }
+
+      // 2. Set non-blocking in-app success notification
+      setPasteImportSummary(res.summary);
+
+      // 3. Refresh imports history & set new active batch & align results date to the imported processing date
+      setActiveBatchId(res.importRecord.id);
+      setViewMode('working_batch');
+      setResultsDate(selectedDate);
+      setActiveTab('PASS');
+      setGenderFilter('ALL');
+      setNameMatchFilter('ALL');
+      setRoleFilter('ALL');
+      setSearchQuery('');
+      setPage(1);
 
       await refreshAllWorkspaceData({
         batchId: res.importRecord.id,
         resultsDate: selectedDate,
         viewMode: 'working_batch',
         tab: 'PASS',
+        gender: 'ALL',
+        nameMatch: 'ALL',
+        role: 'ALL',
+        search: '',
         page: 1,
       });
-
-      alert(`Paste Import Completed!\n• Total Records: ${res.summary.totalApplicants}\n• Passed: ${res.summary.passed}\n• Manual Review: ${res.summary.manualReview}\n• Failed: ${res.summary.failed}\n• Errors/Invalid: ${res.summary.errors}`);
     } catch (err: any) {
       setPasteError(err.message || 'Failed to import pasted applications.');
     } finally {
@@ -657,6 +690,10 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
     setPasteError(null);
     setPasteBatchLabel('');
     clearUnsavedPasteDraft();
+    if (pasteTextareaRef.current) {
+      pasteTextareaRef.current.value = '';
+      pasteTextareaRef.current.focus();
+    }
   };
 
   // Direct Paste: Cancel Action
@@ -665,46 +702,39 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
     setImportMethod('upload');
   };
 
-  // 1-Click Copy Passed Applications as Google Sheets TSV (Guaranteed Unique / Deduplicated)
-  const handleCopyPassedApplications = async (
-    includeHeaders = false,
-    options: {
-      onlyNewCandidates?: boolean;
-      gender?: string;
-      uniqueOnly?: boolean;
-    } = {}
-  ) => {
+  // 1-Click Canonical Copy: Exact 8 Google Sheets Columns (Date, Name, ContactNumber, Email I'd, Job Role, GREEN CARD/ US-C, H1B-Y/N, Resume Link)
+  const handleCopyUniquePassedApplications = async (includeHeaders = true) => {
     try {
       const idsToCopy = selectedApplicantIds.length > 0 ? selectedApplicantIds : undefined;
       const res = await api.copyGoogleSheetsTsv({
-        status: activeTab === 'ALL' ? undefined : (activeTab === 'PASS' ? 'PASS' : activeTab),
+        status: 'PASS',
         company: activeCompany,
         importId: viewMode === 'working_batch' && activeBatchId && activeBatchId !== 'ALL' ? activeBatchId : undefined,
-        applicationDate: resultsDate !== 'ALL' ? resultsDate : undefined,
+        applicationDate: viewMode === 'permanent_history' && resultsDate !== 'ALL' ? resultsDate : undefined,
         startDate: viewMode === 'permanent_history' && historyStartDate ? historyStartDate : undefined,
         endDate: viewMode === 'permanent_history' && historyEndDate ? historyEndDate : undefined,
         jobId: selectedJobSlot !== 'ALL' ? selectedJobSlot : undefined,
-        gender: options.gender || (genderFilter !== 'ALL' ? genderFilter : undefined),
+        gender: genderFilter !== 'ALL' ? genderFilter : undefined,
         role: roleFilter !== 'ALL' ? roleFilter : undefined,
         nameMatchCategory: nameMatchFilter !== 'ALL' ? nameMatchFilter : undefined,
         search: searchQuery ? searchQuery : undefined,
         ids: idsToCopy,
         includeHeaders,
-        uniqueOnly: options.uniqueOnly !== false, // Default to true: "Do not copy duplicates to Google Sheets"
-        onlyNewCandidates: options.onlyNewCandidates === true,
+        uniqueOnly: true,
       });
 
-      const dateDesc = resultsDate !== 'ALL'
-        ? `for ingestion date ${formatDayMonthYear(resultsDate)}`
-        : (historyStartDate || historyEndDate
-            ? `for range ${historyStartDate || '...'} to ${historyEndDate || '...'}`
-            : 'for all dates');
+      const dateDesc = viewMode === 'working_batch'
+        ? 'from active daily batch'
+        : (resultsDate !== 'ALL'
+          ? `for ${formatDayMonthYear(resultsDate)}`
+          : (historyStartDate || historyEndDate
+              ? `for range ${historyStartDate || '...'} to ${historyEndDate || '...'}`
+              : 'across all dates'));
 
-      const filterDesc = (options.gender || genderFilter !== 'ALL') ? ` [${options.gender || genderFilter}]` : '';
-      const typeDesc = options.onlyNewCandidates ? ' NEW Unique' : ' Unique';
+      const genderDesc = genderFilter !== 'ALL' ? ` [${genderFilter}]` : '';
 
       setCopySuccessMessage(
-        `Copied ${res.total}${typeDesc} application(s) (${dateDesc}${filterDesc}) formatted for Google Sheets without duplicates! (8 Columns: Date, Name, Contact, Email, Role, GC/US-C, H1B, LinkedIn). Ready to paste with Ctrl+V.`
+        `Copied ${res.total} unique passed application(s) ${dateDesc}${genderDesc}! Exact 8 Columns: Date, Name, ContactNumber, Email I'd, Job Role, GREEN CARD/ US-C, H1B-Y/N, Resume Link. Ready to paste with Ctrl+V into Google Sheets.`
       );
       setTimeout(() => setCopySuccessMessage(null), 5000);
     } catch (err: any) {
@@ -780,7 +810,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
         status: activeTab === 'ALL' ? undefined : (activeTab === 'PASS' ? 'PASS' : activeTab),
         company: activeCompany,
         importId: viewMode === 'working_batch' && activeBatchId && activeBatchId !== 'ALL' ? activeBatchId : undefined,
-        applicationDate: resultsDate !== 'ALL' ? resultsDate : undefined,
+        applicationDate: viewMode === 'permanent_history' && resultsDate !== 'ALL' ? resultsDate : undefined,
         startDate: viewMode === 'permanent_history' && historyStartDate ? historyStartDate : undefined,
         endDate: viewMode === 'permanent_history' && historyEndDate ? historyEndDate : undefined,
         jobId: selectedJobSlot !== 'ALL' ? selectedJobSlot : undefined,
@@ -793,11 +823,13 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
         includeHeaders,
       });
 
-      const dateDesc = resultsDate !== 'ALL'
-        ? `for ingestion date ${formatDayMonthYear(resultsDate)}`
-        : (historyStartDate || historyEndDate
-            ? `for range ${historyStartDate || '...'} to ${historyEndDate || '...'}`
-            : 'for all dates');
+      const dateDesc = viewMode === 'working_batch'
+        ? 'from active daily batch'
+        : (resultsDate !== 'ALL'
+          ? `for ingestion date ${formatDayMonthYear(resultsDate)}`
+          : (historyStartDate || historyEndDate
+              ? `for range ${historyStartDate || '...'} to ${historyEndDate || '...'}`
+              : 'for all dates'));
 
       const filterDesc = genderFilter !== 'ALL' ? ` [${genderFilter}]` : '';
 
@@ -929,24 +961,35 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
 
   // Clear Working Batch (Safe Scoped Action, NEVER Global Wipe)
   const handleClearCurrentBatch = async () => {
-    if (!activeBatchId) {
-      alert('No active batch selected to clear.');
-      return;
+    const target = batchToClear || (displayedBatches[0]?.id || 'ALL_TODAY');
+    const effectiveDate = viewMode === 'permanent_history' && resultsDate !== 'ALL' ? resultsDate : undefined;
+
+    if (isPurgingRecords && (target === 'ALL_TODAY' || target === 'ALL_SLOTS')) {
+      const confirmed = window.confirm(`⚠️ DANGER: You are about to permanently PURGE ALL uploads and applicants uploaded today for ${activeCompany}.\n\nThis cannot be undone. Are you absolutely sure?`);
+      if (!confirmed) return;
     }
 
     try {
-      const res = await api.clearCurrentBatch(activeBatchId, activeCompany, isPurgingRecords, 'Recruiter Admin');
-      alert(`Batch Cleared Successfully:\n${res.message}\nPermanent database, candidate profiles, reference datasets, and audit history remain preserved.`);
+      const res = await api.clearCurrentBatch(target, activeCompany, isPurgingRecords, 'Recruiter Admin', effectiveDate);
+      alert(`Clear Operation Completed:\n${res.message}\nPermanent database, candidate profiles, reference datasets, and audit history remain preserved.`);
       setIsClearBatchModalOpen(false);
 
-      // Refresh batch list
-      const updatedImports = await api.getImports(activeCompany, 50);
+      if (target === 'ALL_TODAY' || target === 'ALL_SLOTS') {
+        setActiveBatchId('');
+      } else if (activeBatchId === target) {
+        setActiveBatchId('');
+      }
+
+      // Refresh batch list and dates
+      const [updatedImports, updatedDates] = await Promise.all([
+        api.getImports(activeCompany, 50),
+        api.getIngestionDates(activeCompany),
+      ]);
       setBatchHistory(updatedImports);
-      const nextBatchId = updatedImports.length > 0 ? updatedImports[0].id : '';
-      setActiveBatchId(nextBatchId);
-      await refreshAllWorkspaceData({ batchId: nextBatchId });
+      setAvailableIngestionDates(updatedDates.dates || []);
+      await refreshAllWorkspaceData({ batchId: '' });
     } catch (err: any) {
-      alert(`Failed to clear batch: ${err.message}`);
+      alert(`Failed to clear: ${err.message}`);
     }
   };
 
@@ -1026,7 +1069,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
         role: roleFilter !== 'ALL' ? roleFilter : undefined,
         company: activeCompany,
         batchId: viewMode === 'working_batch' && activeBatchId && activeBatchId !== 'ALL' ? activeBatchId : undefined,
-        applicationDate: resultsDate !== 'ALL' ? resultsDate : undefined,
+        applicationDate: viewMode === 'permanent_history' && resultsDate !== 'ALL' ? resultsDate : undefined,
         jobId: selectedJobSlot !== 'ALL' ? selectedJobSlot : undefined,
       } as any);
       if (res && res.ids) {
@@ -1079,6 +1122,15 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
   };
 
   const activeBatchRecord = batchHistory.find(b => b.id === activeBatchId);
+
+  // Filtered batch history for active workspace view:
+  // In Daily Batch Workspace, show ONLY active working uploads (b.activeWorkingBatch !== false)
+  const displayedBatches = useMemo(() => {
+    if (viewMode === 'working_batch') {
+      return batchHistory.filter(b => b.activeWorkingBatch !== false);
+    }
+    return batchHistory;
+  }, [batchHistory, viewMode]);
 
   return (
     <div className="space-y-6">
@@ -1199,22 +1251,67 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
                 <AlertTriangle className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-900">Clear Current Working Batch</h3>
+                <h3 className="text-sm font-bold text-slate-900">
+                  {batchToClear === 'ALL_TODAY' || batchToClear === 'ALL_SLOTS'
+                    ? "Clear Today's Active Uploads"
+                    : 'Clear Working Batch'}
+                </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Safe scoped action for workspace <strong>{activeCompany}</strong>.
                 </p>
               </div>
             </div>
 
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 space-y-1.5">
-              <p>
-                <strong>Batch:</strong> {activeBatchRecord?.batchName || activeBatchId} ({activeBatchRecord?.importCode || 'N/A'})
-              </p>
-              <p>
-                This clears the current active working batch session from this workspace.
-              </p>
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 space-y-2">
+              <div className="space-y-1">
+                <label className="font-semibold text-slate-800 block">Select Slot / Batch to Clear:</label>
+                <select
+                  value={batchToClear}
+                  onChange={(e) => setBatchToClear(e.target.value)}
+                  className="w-full bg-white border border-amber-300 rounded px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-amber-500 shadow-2xs cursor-pointer"
+                >
+                  <optgroup label={`Active Uploads (${displayedBatches.length})`}>
+                    {displayedBatches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.batchName || b.importCode} ({b.totalApplicants} applicants)
+                      </option>
+                    ))}
+                  </optgroup>
+                  {displayedBatches.length > 1 && (
+                    <optgroup label="⚠️ Entire Day Batch Action">
+                      <option value="ALL_TODAY" className="font-bold text-amber-900 bg-amber-100">
+                        ⚡ All Today's Uploads ({displayedBatches.length} Batches, {displayedBatches.reduce((s, b) => s + (b.totalApplicants || 0), 0)} applicants)
+                      </option>
+                    </optgroup>
+                  )}
+                </select>
+              </div>
+
+              {batchToClear === 'ALL_TODAY' || batchToClear === 'ALL_SLOTS' ? (
+                <div className="pt-1.5 border-t border-amber-200/60 space-y-1">
+                  <p className="font-bold text-amber-900 flex items-center justify-between">
+                    <span>Scope: All {displayedBatches.length} Uploads Today</span>
+                    <span className="px-2 py-0.5 rounded bg-amber-200 text-amber-900 text-[10px]">
+                      {displayedBatches.reduce((s, b) => s + (b.totalApplicants || 0), 0)} Applicants
+                    </span>
+                  </p>
+                  <p>
+                    This clears <strong>all uploads for today</strong> for <strong>{activeCompany}</strong> at a time.
+                  </p>
+                </div>
+              ) : (
+                <div className="pt-1.5 border-t border-amber-200/60 space-y-1">
+                  <p className="font-bold text-amber-900">
+                    Scope: {batchHistory.find(b => b.id === batchToClear)?.batchName || batchToClear} ({batchHistory.find(b => b.id === batchToClear)?.totalApplicants || 0} applicants)
+                  </p>
+                  <p>
+                    This clears only this selected upload ({batchHistory.find(b => b.id === batchToClear)?.batchName || 'batch'}) from the active workspace.
+                  </p>
+                </div>
+              )}
+
               <p className="text-[11px] text-amber-700">
-                Notice: All candidate profiles in the Master Candidate CRM, baseline job slots, screening rules, reference datasets, other batches, and historical reports remain intact.
+                Notice: All candidate profiles in the Master Candidate CRM, baseline job slots, screening rules, reference datasets, and historical reports remain intact.
               </p>
             </div>
 
@@ -1226,7 +1323,11 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
                   onChange={(e) => setIsPurgingRecords(e.target.checked)}
                   className="rounded border-slate-300 text-blue-600 focus:ring-0"
                 />
-                <span>Also purge this batch's applicant rows from the current filter list (keeps master profiles)</span>
+                <span>
+                  {batchToClear === 'ALL_TODAY' || batchToClear === 'ALL_SLOTS'
+                    ? "Also purge today's applicant rows from filter workspace (keeps master profiles)"
+                    : "Also purge this upload's applicant rows from the filter workspace (keeps master profiles)"}
+                </span>
               </label>
             </div>
 
@@ -1234,16 +1335,21 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsClearBatchModalOpen(false)}
-                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50"
+                className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 cursor-pointer"
               >
-                Keep Batch
+                Cancel
               </button>
               <button
                 type="button"
                 onClick={handleClearCurrentBatch}
-                className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-xs"
+                className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow-xs cursor-pointer flex items-center gap-1.5"
               >
-                Confirm Clear Current Batch
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>
+                  {batchToClear === 'ALL_TODAY' || batchToClear === 'ALL_SLOTS'
+                    ? `Confirm Clear All ${displayedBatches.length} Uploads Today`
+                    : `Confirm Clear Selected Upload (${batchHistory.find(b => b.id === batchToClear)?.batchName || 'Upload'})`}
+                </span>
               </button>
             </div>
           </div>
@@ -1639,6 +1745,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
               {/* Comfortable Paste Textarea */}
               <div>
                 <textarea
+                  ref={pasteTextareaRef}
                   value={pastedText}
                   onChange={(e) => {
                     setPastedText(e.target.value);
@@ -1676,14 +1783,12 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
                   <button
                     type="button"
                     onClick={handleImportPastedData}
-                    disabled={isImportingPaste || !pastePreview || pastePreview.validRows === 0}
+                    disabled={isImportingPaste || !pastedText.trim()}
                     className="btn-primary !text-xs !py-1.5 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
                     title={
-                      !pastePreview
-                        ? 'Please click "Preview Pasted Data" before importing'
-                        : pastePreview.validRows === 0
-                        ? 'Cannot import: no valid application rows found'
-                        : 'Import and screen applications'
+                      !pastedText.trim()
+                        ? 'Please paste application rows into the box above to import'
+                        : 'Import and screen applications directly into active batch workspace'
                     }
                   >
                     {isImportingPaste ? (
@@ -1734,7 +1839,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
 
               {/* Paste Import Success Toast */}
               {pasteImportSummary && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs flex items-center justify-between animate-in fade-in">
+                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs flex flex-wrap items-center justify-between gap-2 animate-in fade-in">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                     <div>
@@ -1742,12 +1847,16 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
                       <span>
                         {pasteImportSummary.totalApplicants} application(s) processed ({pasteImportSummary.passed} Passed, {pasteImportSummary.manualReview} Manual Review, {pasteImportSummary.failed} Failed, {pasteImportSummary.errors} Errors).
                       </span>
+                      <span className="ml-2 inline-flex items-center gap-1 font-semibold text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded text-[11px]">
+                        ✓ Paste area cleared — Ready for next batch!
+                      </span>
                     </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setPasteImportSummary(null)}
-                    className="text-emerald-700 hover:text-emerald-900 p-1"
+                    className="text-emerald-700 hover:text-emerald-900 p-1 cursor-pointer"
+                    title="Dismiss notification"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -1867,7 +1976,11 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
             <div className="bg-white border border-slate-200 p-0.5 rounded-lg flex items-center text-xs font-medium">
               <button
                 type="button"
-                onClick={() => setViewMode('working_batch')}
+                onClick={() => {
+                  setViewMode('working_batch');
+                  setResultsDate('ALL');
+                  setPage(1);
+                }}
                 className={`px-3 py-1 rounded transition-all ${
                   viewMode === 'working_batch'
                     ? 'bg-blue-600 text-white font-semibold shadow-xs'
@@ -1889,16 +2002,18 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
               </button>
             </div>
 
-            {viewMode === 'working_batch' && batchHistory.length > 0 && (
+            {viewMode === 'working_batch' && displayedBatches.length > 0 && (
               <select
                 value={activeBatchId}
                 onChange={(e) => setActiveBatchId(e.target.value)}
                 className="text-xs py-1 px-2.5 bg-white border border-slate-200 rounded-lg text-slate-800 font-medium focus:outline-none"
               >
                 <option value="ALL">
-                  All Uploaded Files ({batchHistory.length} active batches)
+                  {resultsDate !== 'ALL'
+                    ? `All Today's Uploads (${displayedBatches.length} active batches)`
+                    : `All Uploaded Files (${displayedBatches.length} active batches)`}
                 </option>
-                {batchHistory.map((b) => (
+                {displayedBatches.map((b) => (
                   <option key={b.id} value={b.id}>
                     [{b.importCode}] {getBatchDisplayName(b)} ({b.totalApplicants} rows)
                   </option>
@@ -1906,39 +2021,71 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
               </select>
             )}
 
-            {/* Explicit Portal Ingestion Date Filter Dropdown */}
-            <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
-              <span className="text-[11px] font-semibold text-slate-500 pl-2 flex items-center gap-1">
-                <Calendar className="w-3.5 h-3.5 text-blue-600" />
-                <span className="hidden sm:inline">Ingestion Date:</span>
-              </span>
-              <select
-                value={resultsDate}
-                onChange={(e) => {
-                  setResultsDate(e.target.value);
-                  setPage(1);
-                }}
-                className="text-xs py-1 px-2 bg-transparent border-0 text-slate-800 font-medium focus:outline-none cursor-pointer"
-                title="Filter records and copy operations by portal ingestion date"
-              >
-                <option value="ALL">All Ingestion Dates</option>
-                {availableIngestionDates.map((d) => (
-                  <option key={d.date} value={d.date}>
-                    {formatDayMonthYear(d.date)} ({d.count} records)
-                  </option>
-                ))}
-              </select>
-              {resultsDate !== 'ALL' && (
-                <button
-                  type="button"
-                  onClick={() => { setResultsDate('ALL'); setPage(1); }}
-                  className="px-1.5 py-1 text-[11px] text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded transition-colors"
-                  title="Show all dates"
+            {/* Date Display: Pinned to Today's Uploads in Daily Batch; Multi-Date Selector in Permanent History */}
+            {viewMode === 'working_batch' ? (
+              <div className="flex items-center gap-1.5 bg-blue-50/80 border border-blue-200 px-2.5 py-1 rounded-lg text-xs font-semibold text-blue-900 shadow-2xs">
+                <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span className="text-slate-600 font-medium">Today's Batch:</span>
+                <span className="font-bold text-blue-700">
+                  {formatDayMonthYear(getTodayDateString())}
+                </span>
+                {(() => {
+                  const currentBatchObj = activeBatchId && activeBatchId !== 'ALL'
+                    ? displayedBatches.find(b => b.id === activeBatchId)
+                    : null;
+                  const totalBatchCount = currentBatchObj
+                    ? currentBatchObj.totalApplicants
+                    : displayedBatches.reduce((acc, b) => acc + (b.totalApplicants || 0), 0);
+                  const isFiltered = (genderFilter !== 'ALL' || roleFilter !== 'ALL' || nameMatchFilter !== 'ALL' || searchQuery.trim() !== '') && totalBatchCount > tabCounts.all;
+                  return (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                        isFiltered
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          : 'bg-blue-200/70 text-blue-900'
+                      }`}
+                      title={isFiltered ? `Active filters are hiding ${totalBatchCount - tabCounts.all} records. Showing ${tabCounts.all} of ${totalBatchCount} total records.` : `${tabCounts.all} total records in active batch`}
+                    >
+                      {isFiltered ? `${tabCounts.all} of ${totalBatchCount} records (Filtered)` : `${tabCounts.all} records`}
+                    </span>
+                  );
+                })()}
+              </div>
+            ) : (
+              /* Explicit Portal Ingestion Date Filter Dropdown (Permanent History) */
+              <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
+                <span className="text-[11px] font-semibold text-slate-500 pl-2 flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-blue-600" />
+                  <span className="hidden sm:inline">Ingestion Date:</span>
+                </span>
+                <select
+                  value={resultsDate}
+                  onChange={(e) => {
+                    setResultsDate(e.target.value);
+                    setPage(1);
+                  }}
+                  className="text-xs py-1 px-2 bg-transparent border-0 text-slate-800 font-medium focus:outline-none cursor-pointer"
+                  title="Filter records and copy operations by portal ingestion date"
                 >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-            </div>
+                  <option value="ALL">All Ingestion Dates</option>
+                  {availableIngestionDates.map((d) => (
+                    <option key={d.date} value={d.date}>
+                      {formatDayMonthYear(d.date)} ({d.count} records)
+                    </option>
+                  ))}
+                </select>
+                {resultsDate !== 'ALL' && (
+                  <button
+                    type="button"
+                    onClick={() => { setResultsDate('ALL'); setPage(1); }}
+                    className="px-1.5 py-1 text-[11px] text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                    title="Show all dates"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Permanent History Date Range Filter */}
             {viewMode === 'permanent_history' && (
@@ -1974,30 +2121,38 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
               </div>
             )}
 
-            {/* Active Date Scope Indicator Badge */}
-            <div className="hidden lg:flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-              <Calendar className="w-3 h-3 text-blue-600 shrink-0" />
-              <span>
-                {resultsDate === 'ALL'
-                  ? (historyStartDate || historyEndDate
-                      ? `Range: ${historyStartDate || '...'} to ${historyEndDate || '...'}`
-                      : 'All Ingestion Dates')
-                  : formatDayMonthYear(resultsDate)}
-              </span>
-              <span className="text-blue-500 font-normal">
-                ({tabCounts.all} records)
-              </span>
-            </div>
+            {/* Active Date Scope Indicator Badge (Permanent History) */}
+            {viewMode === 'permanent_history' && (
+              <div className="hidden lg:flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                <Calendar className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span>
+                  {resultsDate === 'ALL'
+                    ? (historyStartDate || historyEndDate
+                        ? `Range: ${historyStartDate || '...'} to ${historyEndDate || '...'}`
+                        : 'All Ingestion Dates')
+                    : formatDayMonthYear(resultsDate)}
+                </span>
+                <span className="text-blue-500 font-normal">
+                  ({tabCounts.all} records)
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Batch Actions: Clear Current Batch & Clear All Applications */}
           <div className="flex items-center gap-2">
-            {viewMode === 'working_batch' && activeBatchId && activeBatchId !== 'ALL' && (
+            {displayedBatches.length > 0 && (
               <button
                 type="button"
-                onClick={() => setIsClearBatchModalOpen(true)}
+                onClick={() => {
+                  const defaultTarget = (activeBatchId && activeBatchId !== 'ALL' && displayedBatches.some(b => b.id === activeBatchId))
+                    ? activeBatchId
+                    : (displayedBatches[0]?.id || 'ALL_TODAY');
+                  setBatchToClear(defaultTarget);
+                  setIsClearBatchModalOpen(true);
+                }}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#E0E6EF] hover:border-[#F8D8A8] text-[#A66B19] hover:bg-[#FEF6E9] bg-white text-xs font-semibold transition-all shadow-2xs cursor-pointer"
-                title="Clears only this working batch from the active workspace without touching master database"
+                title="Clears today's uploads at once or delete a particular upload (like DA-3) without touching master database"
               >
                 <Trash2 className="w-3.5 h-3.5 text-[#A66B19]" />
                 <span>Clear Current Batch</span>
@@ -2019,41 +2174,43 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
         {/* Separate Passed, Failed, and Manual Review Tabs */}
         <div className="px-5 pt-3 border-b border-[#E0E6EF] flex flex-wrap items-center justify-between gap-3 bg-white">
           <div className="flex items-center gap-2 border-b border-transparent">
-            {/* Passed Tab */}
+            {/* 1. Passed — Unique Tab */}
             <button
               type="button"
               onClick={() => { setActiveTab('PASS'); setPage(1); }}
               className={`flex items-center gap-2 px-3.5 py-2.5 border-b-2 text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === 'PASS'
+                activeTab === 'PASS' || activeTab === 'UNIQUE_PASSED'
                   ? 'border-[#16836B] text-[#16836B] bg-[#E6F5F1]'
                   : 'border-transparent text-[#65738B] hover:text-[#18243A]'
               }`}
+              title="Passed Unique Applications: Meets all statutory screening rules and verified non-duplicate"
             >
               <CheckCircle2 className="w-4 h-4 text-[#16836B]" />
-              <span>Passed Results</span>
+              <span>Passed — Unique</span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#E6F5F1] text-[#16836B] border border-[#A3DCD0] font-bold">
                 {tabCounts.pass}
               </span>
             </button>
 
-            {/* Manual Review Tab */}
+            {/* 2. Passed (All) Tab (Includes unique + duplicate passed for direct comparison) */}
             <button
               type="button"
-              onClick={() => { setActiveTab('MANUAL_REVIEW'); setPage(1); }}
+              onClick={() => { setActiveTab('ALL_PASSED'); setPage(1); }}
               className={`flex items-center gap-2 px-3.5 py-2.5 border-b-2 text-xs font-semibold transition-all cursor-pointer ${
-                activeTab === 'MANUAL_REVIEW'
-                  ? 'border-[#A66B19] text-[#A66B19] bg-[#FEF6E9]'
+                activeTab === 'ALL_PASSED'
+                  ? 'border-[#0D9488] text-[#0D9488] bg-[#F0FDFA]'
                   : 'border-transparent text-[#65738B] hover:text-[#18243A]'
               }`}
+              title="Passed (All): All candidates meeting statutory screening rules, including duplicate applications (for audit and comparison)"
             >
-              <AlertTriangle className="w-4 h-4 text-[#A66B19]" />
-              <span>Manual Review</span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FEF6E9] text-[#A66B19] border border-[#F8D8A8] font-bold">
-                {tabCounts.review}
+              <CheckCheck className="w-4 h-4 text-[#0D9488]" />
+              <span>Passed (All)</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#F0FDFA] text-[#0D9488] border border-[#99F6E4] font-bold">
+                {tabCounts.allPassed ?? tabCounts.pass}
               </span>
             </button>
 
-            {/* Failed Tab */}
+            {/* 3. Failed Tab */}
             <button
               type="button"
               onClick={() => { setActiveTab('FAIL'); setPage(1); }}
@@ -2062,15 +2219,52 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
                   ? 'border-[#C44750] text-[#C44750] bg-[#FDF0F1]'
                   : 'border-transparent text-[#65738B] hover:text-[#18243A]'
               }`}
+              title="Failed Applications: Fails statutory screening requirements"
             >
               <XCircle className="w-4 h-4 text-[#C44750]" />
-              <span>Failed Requirements</span>
+              <span>Failed</span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FDF0F1] text-[#C44750] border border-[#F6C1C5] font-bold">
                 {tabCounts.fail}
               </span>
             </button>
 
-            {/* All Tab */}
+            {/* 3. Needs Review Tab */}
+            <button
+              type="button"
+              onClick={() => { setActiveTab('MANUAL_REVIEW'); setPage(1); }}
+              className={`flex items-center gap-2 px-3.5 py-2.5 border-b-2 text-xs font-semibold transition-all cursor-pointer ${
+                activeTab === 'MANUAL_REVIEW'
+                  ? 'border-[#A66B19] text-[#A66B19] bg-[#FEF6E9]'
+                  : 'border-transparent text-[#65738B] hover:text-[#18243A]'
+              }`}
+              title="Needs Review: Requires human recruiter review or verification"
+            >
+              <AlertTriangle className="w-4 h-4 text-[#A66B19]" />
+              <span>Needs Review</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#FEF6E9] text-[#A66B19] border border-[#F8D8A8] font-bold">
+                {tabCounts.review}
+              </span>
+            </button>
+
+            {/* 4. Duplicate Applications Tab */}
+            <button
+              type="button"
+              onClick={() => { setActiveTab('DUPLICATE'); setPage(1); }}
+              className={`flex items-center gap-2 px-3.5 py-2.5 border-b-2 text-xs font-semibold transition-all cursor-pointer ${
+                activeTab === 'DUPLICATE'
+                  ? 'border-[#7C3AED] text-[#7C3AED] bg-[#F5F3FF]'
+                  : 'border-transparent text-[#65738B] hover:text-[#18243A]'
+              }`}
+              title="Duplicate Applications: Exact application occurrences already processed or transferred for this job slot"
+            >
+              <Copy className="w-4 h-4 text-[#7C3AED]" />
+              <span>Duplicate Applications</span>
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#F5F3FF] text-[#7C3AED] border border-[#DDD6FE] font-bold">
+                {tabCounts.duplicate}
+              </span>
+            </button>
+
+            {/* 5. All Records Tab */}
             <button
               type="button"
               onClick={() => { setActiveTab('ALL'); setPage(1); }}
@@ -2079,6 +2273,7 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
                   ? 'border-[#3659D9] text-[#3659D9] bg-[#E8EDFA] font-semibold'
                   : 'border-transparent text-[#65738B] hover:text-[#18243A]'
               }`}
+              title="All Records = Passed — Unique + Failed + Needs Review + Duplicate Applications"
             >
               <span>All Records</span>
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#F1F4F9] text-[#65738B] border border-[#E0E6EF]">
@@ -2140,6 +2335,37 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
                 className="w-full pl-8 pr-3 py-1.5 text-xs bg-[#F1F4F9] border border-[#E0E6EF] rounded-lg text-[#18243A] placeholder-[#8995A8] focus:outline-none focus:border-[#3659D9] focus:bg-white"
               />
             </div>
+
+            {/* Active Filters Pill / Clear All Indicator */}
+            {(genderFilter !== 'ALL' || roleFilter !== 'ALL' || nameMatchFilter !== 'ALL' || searchQuery.trim() !== '') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setGenderFilter('ALL');
+                  setNameMatchFilter('ALL');
+                  setRoleFilter('ALL');
+                  setSearchQuery('');
+                  setPage(1);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-all cursor-pointer shadow-2xs"
+                title="Click to reset all filters to show all candidates in this batch"
+              >
+                <Filter className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span>
+                  Filtered by:{' '}
+                  {[
+                    genderFilter !== 'ALL' ? (genderFilter === 'FEMALE' ? 'Female ♀' : genderFilter === 'MALE' ? 'Male ♂' : 'Unspecified ?') : null,
+                    roleFilter !== 'ALL' ? `Role: ${roleFilter}` : null,
+                    nameMatchFilter !== 'ALL' ? `Match: ${nameMatchFilter}` : null,
+                    searchQuery.trim() ? `"${searchQuery.trim()}"` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' • ')}
+                </span>
+                <span className="font-bold underline text-blue-800 ml-1">Clear & Show All</span>
+                <X className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              </button>
+            )}
           </div>
         </div>
 
@@ -2226,13 +2452,13 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
           </div>
 
           <div className="flex items-center flex-wrap gap-2">
-            {/* Phase 2: Explicit Action to Transfer Approved Passed Applications to Master Candidate Database (Prompt Section 5 Step 3) */}
+            {/* 1. Explicit Action: Send Unique Passed Applications to Master Candidate Database */}
             <button
               type="button"
               onClick={handleSendPassedToMaster}
               disabled={isTransferring}
               className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold !text-xs !py-1.5 px-3 rounded-lg shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-              title="Transfer all final approved PASSED applications in this batch into the permanent Master Candidate Database (deduplicates against existing candidates)"
+              title="Transfer all final approved PASSED applications in this batch into the permanent Master Candidate Database (links existing candidates to Person ID, prevents duplicate imports)"
             >
               {isTransferring ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
@@ -2244,75 +2470,37 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
                   ? 'Transferring...'
                   : selectedApplicantIds.length > 0
                   ? `Send Selected Passed (${selectedApplicantIds.length}) to Master DB`
-                  : 'Send Passed Applications to Master DB'}
+                  : `Send Passed Applications to Master DB (${tabCounts.pass})`}
               </span>
             </button>
 
-            {/* Step 5 / User Request: Copy Only New Candidates (Unique, No Duplicates) */}
+            {/* 2. Canonical Single Copy Button: Exact 8 Google Sheets Columns */}
             <button
               type="button"
-              onClick={() => handleCopyPassedApplications(false, { onlyNewCandidates: true, uniqueOnly: true })}
-              className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold !text-xs !py-1.5 px-3 rounded-lg shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="Copy only brand new candidate applications (excluding repeat applicants and all duplicates) formatted for Google Sheets (Ctrl+V)"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300" />
-              <span>Copy Only New Unique</span>
-            </button>
-
-            {/* Step 5: Copy All Unique Passed (Strictly deduplicated) */}
-            <button
-              type="button"
-              onClick={() => handleCopyPassedApplications(false, { uniqueOnly: true })}
-              className="btn-secondary !text-xs !py-1.5 shadow-2xs flex items-center gap-1.5 font-semibold"
-              title="Copy all passed applications with guaranteed zero duplicates for Google Sheets (Ctrl+V)"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span>Copy All Unique Passed</span>
-            </button>
-
-            {/* Primary Action: Copy for Google Sheets (Verification & Match TSV - Section 6.3 8-Column Format) */}
-            <button
-              type="button"
-              onClick={() => handleCopyVerificationTsv(false)}
-              className="btn-primary !text-xs !py-1.5 shadow-xs flex items-center gap-1.5"
-              title="Copy 8 clean verification columns (Candidate Name, Role, Email, Phone, Gender, Status, Match Score, Matched Reference) ready for Google Sheets (Ctrl+V)"
+              onClick={() => handleCopyUniquePassedApplications(includeHeadersInCopy)}
+              className="bg-[#3659D9] hover:bg-[#2B47B5] active:bg-[#1E358A] text-white font-bold !text-xs !py-1.5 px-3.5 rounded-lg shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Generate one final, accurate, duplicate-filtered Passed application dataset with exactly eight Google Sheets columns: Date, Name, ContactNumber, Email I'd, Job Role, GREEN CARD/ US-C, H1B-Y/N, Resume Link"
             >
               <Copy className="w-3.5 h-3.5" />
               <span>
                 {selectedApplicantIds.length > 0
-                  ? `Copy Selected (${selectedApplicantIds.length}) to Sheets`
-                  : 'Verification TSV'}
+                  ? `COPY SELECTED UNIQUE PASSED (${selectedApplicantIds.length})`
+                  : `COPY UNIQUE PASSED APPLICATIONS (${tabCounts.pass})`}
               </span>
             </button>
 
-            {/* Step 5: Quick Gender Unique Outputs */}
-            <div className="flex items-center gap-1 bg-white p-0.5 rounded-lg border border-slate-200">
-              <button
-                type="button"
-                onClick={() => handleCopyPassedApplications(false, { gender: 'MALE', uniqueOnly: true })}
-                className="text-[10px] font-semibold text-blue-700 hover:bg-blue-50 px-2 py-1 rounded transition-colors cursor-pointer"
-                title="Copy Male Unique Passed applications without duplicates"
-              >
-                ♂ Male Unique
-              </button>
-              <button
-                type="button"
-                onClick={() => handleCopyPassedApplications(false, { gender: 'FEMALE', uniqueOnly: true })}
-                className="text-[10px] font-semibold text-rose-700 hover:bg-rose-50 px-2 py-1 rounded transition-colors cursor-pointer"
-                title="Copy Female Unique Passed applications without duplicates"
-              >
-                ♀ Female Unique
-              </button>
-            </div>
-
-            {/* Optional: With Headers Toggle */}
+            {/* 3. With Headers Toggle */}
             <button
               type="button"
-              onClick={() => handleCopyVerificationTsv(true)}
-              className="btn-tertiary !text-xs !py-1.5"
-              title="Copy with header row"
+              onClick={() => setIncludeHeadersInCopy(!includeHeadersInCopy)}
+              className={`text-xs px-2.5 py-1 rounded border font-medium transition-colors cursor-pointer ${
+                includeHeadersInCopy
+                  ? 'bg-slate-800 text-white border-slate-700 font-semibold shadow-xs'
+                  : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+              }`}
+              title="Toggle whether copied Google Sheets TSV includes the header row"
             >
-              <span>With Headers</span>
+              <span>{includeHeadersInCopy ? '✓ With Headers' : 'No Headers'}</span>
             </button>
           </div>
         </div>
@@ -2379,11 +2567,11 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
                       </td>
                       <td className="py-2.5 px-3 whitespace-nowrap">
                         <div className="font-semibold text-slate-800">
-                          {a.applicationDate || a.createdAt?.split('T')[0] || 'N/A'}
+                          {formatDateDisplay(a.applicationDate || a.createdAt, 'N/A')}
                         </div>
                         {a.dateApplied && a.dateApplied !== a.applicationDate && (
                           <div className="text-[10px] text-slate-400 font-normal" title="Source application date from imported spreadsheet">
-                            Src: {a.dateApplied}
+                            Src: {formatDateDisplay(a.dateApplied)}
                           </div>
                         )}
                       </td>
@@ -2604,17 +2792,8 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
                       <td className="py-2.5 px-3 text-right whitespace-nowrap space-x-1">
                         <button
                           type="button"
-                          onClick={() => handleCopySingleRow(a)}
-                          className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-[11px] transition-colors cursor-pointer"
-                          title="Copy Row to Clipboard (Google Sheets TSV)"
-                        >
-                          <Copy className="w-3.5 h-3.5 inline mr-1" />
-                          <span>Copy</span>
-                        </button>
-                        <button
-                          type="button"
                           onClick={() => setDetailApplicant(a)}
-                          className="px-2 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium text-[11px] transition-colors cursor-pointer"
+                          className="px-2.5 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium text-[11px] transition-colors cursor-pointer"
                           title="View Full Profile Details"
                         >
                           View
@@ -2716,16 +2895,8 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
             </button>
           </div>
 
-          {/* Bulk Copy */}
-          <div className="flex items-center gap-2 pl-3 border-l border-slate-700">
-            <button
-              type="button"
-              onClick={() => handleCopyVerificationTsv(false)}
-              className="px-3 py-1 text-xs font-bold rounded-lg bg-[#3659D9] hover:bg-[#2b48b5] text-white flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Copy className="w-3.5 h-3.5" />
-              <span>Copy to Sheets</span>
-            </button>
+          {/* Deselect All */}
+          <div className="flex items-center pl-3 border-l border-slate-700">
             <button
               type="button"
               onClick={() => setSelectedApplicantIds([])}
@@ -2936,77 +3107,24 @@ export const ApplicationFilterWorkspaceView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Action Buttons */}
+              {/* Action Buttons: Canonical Single Copy Button */}
               <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                {/* 1. Primary Highlight Button: Copy Only New Unique Applications */}
-                <button
-                  type="button"
-                  onClick={() => handleCopyFromTransferModal('NEW_UNIQUE_ONLY')}
-                  disabled={isCopyingFromModal || transferModalSummary.result.newCandidatesCount === 0}
-                  className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs py-2 px-3.5 rounded-lg shadow-sm flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
-                  title="Copy only brand new candidate profiles without any duplicates or previous history"
-                >
-                  {isCopyingFromModal ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300" />
-                  )}
-                  <span>
-                    📋 Copy Only New Unique Applications ({transferModalSummary.result.newCandidatesCount})
-                  </span>
-                </button>
-
-                {/* 2. Secondary Button: Copy All Unique Transferred */}
                 <button
                   type="button"
                   onClick={() => handleCopyFromTransferModal('ALL_TRANSFERRED_UNIQUE')}
                   disabled={isCopyingFromModal || transferModalSummary.result.transferredCount === 0}
-                  className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-xs py-2 px-3 rounded-lg shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-                  title="Copy all successfully transferred unique applications, strictly excluding the skipped duplicates"
+                  className="bg-[#3659D9] hover:bg-[#2B47B5] active:bg-[#1E358A] text-white font-bold text-xs py-2 px-4 rounded-lg shadow-sm flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  title="Copy transferred unique applications formatted with exactly 8 Google Sheets columns (Date, Name, ContactNumber, Email I'd, Job Role, GREEN CARD/ US-C, H1B-Y/N, Resume Link)"
                 >
-                  <Copy className="w-3.5 h-3.5" />
+                  {isCopyingFromModal ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
                   <span>
-                    Copy All Unique Transferred ({transferModalSummary.result.transferredCount})
+                    COPY TRANSFERRED UNIQUE APPLICATIONS ({transferModalSummary.result.transferredCount})
                   </span>
                 </button>
-
-                {/* 3. Tertiary: Copy Repeat Applications */}
-                {Math.max(0, transferModalSummary.result.newApplicationsCount - transferModalSummary.result.newCandidatesCount) > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => handleCopyFromTransferModal('REPEAT_ONLY')}
-                    disabled={isCopyingFromModal}
-                    className="bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white font-semibold text-xs py-2 px-2.5 rounded-lg shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
-                    title="Copy repeat applications for existing candidates"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>
-                      Repeat Apps ({Math.max(0, transferModalSummary.result.newApplicationsCount - transferModalSummary.result.newCandidatesCount)})
-                    </span>
-                  </button>
-                )}
-
-                {/* Gender Specific Unique Copies */}
-                <div className="flex items-center gap-1 ml-auto">
-                  <button
-                    type="button"
-                    onClick={() => handleCopyFromTransferModal('ALL_TRANSFERRED_UNIQUE', 'MALE')}
-                    disabled={isCopyingFromModal}
-                    className="bg-white hover:bg-slate-100 text-blue-800 border border-blue-200 font-semibold text-[11px] py-1.5 px-2 rounded-md shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
-                    title="Copy unique male passed candidates"
-                  >
-                    ♂ Male Unique
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyFromTransferModal('ALL_TRANSFERRED_UNIQUE', 'FEMALE')}
-                    disabled={isCopyingFromModal}
-                    className="bg-white hover:bg-slate-100 text-rose-800 border border-rose-200 font-semibold text-[11px] py-1.5 px-2 rounded-md shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
-                    title="Copy unique female passed candidates"
-                  >
-                    ♀ Female Unique
-                  </button>
-                </div>
               </div>
 
               {/* Feedback toast inside modal */}

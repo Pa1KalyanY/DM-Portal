@@ -23,6 +23,69 @@ function cleanLinkedinIdentifier(url?: string | null): string {
     .trim();
 }
 
+export function canonicalizeLocation(rawLoc?: string | null): string {
+  if (!rawLoc) return 'Unknown / Unspecified';
+  const loc = rawLoc.trim().toLowerCase();
+  if (loc.includes('new york') || loc.includes('nyc') || loc.includes('brooklyn') || loc.includes('jersey city') || loc.includes('manhattan') || loc.includes('queens')) {
+    return 'New York Metro';
+  }
+  if (loc.includes('dallas') || loc.includes('dfw') || loc.includes('denton') || loc.includes('fort worth') || loc.includes('plano') || loc.includes('irving')) {
+    return 'Dallas / DFW';
+  }
+  if (loc.includes('chicago') || loc.includes('illinois')) {
+    return 'Chicago';
+  }
+  if (loc.includes('houston')) {
+    return 'Houston';
+  }
+  if (loc.includes('washington') || loc.includes('baltimore') || loc.includes('dc')) {
+    return 'Washington DC / Baltimore';
+  }
+  if (loc.includes('atlanta') || loc.includes('georgia')) {
+    return 'Atlanta';
+  }
+  if (loc.includes('st louis') || loc.includes('saint louis') || loc.includes('missouri')) {
+    return 'St Louis';
+  }
+  if (loc.includes('san francisco') || loc.includes('bay area') || loc.includes('san jose') || loc.includes('sunnyvale') || loc.includes('oakland')) {
+    return 'SF Bay Area';
+  }
+  if (loc.includes('seattle') || loc.includes('redmond') || loc.includes('bellevue')) {
+    return 'Seattle';
+  }
+  if (loc.includes('austin')) {
+    return 'Austin';
+  }
+  if (loc.includes('los angeles') || loc.includes('orange county')) {
+    return 'Los Angeles';
+  }
+  if (loc.includes('boston') || loc.includes('cambridge')) {
+    return 'Boston';
+  }
+  if (loc.includes('london') || loc.includes('united kingdom') || loc.includes('uk')) {
+    return 'London';
+  }
+  if (loc.includes('toronto') || loc.includes('canada')) {
+    return 'Toronto';
+  }
+  if (loc === 'united states' || loc === 'us') {
+    return 'United States (General)';
+  }
+  return rawLoc.split(',')[0].trim();
+}
+
+export function getTechCategory(jobTitle?: string | null, jobId?: string | null): string {
+  const title = (jobTitle || '').toLowerCase();
+  const id = (jobId || '').toLowerCase();
+  if (title.includes('cyber') || id.includes('cyber') || title.includes('security')) return 'CyberSecurity';
+  if (title.includes('aws') || id.includes('aws') || title.includes('cloud')) return 'AWS';
+  if (title.includes('da') || title.includes('data analyst') || title.includes('analytics')) return 'Data Analytics';
+  if (title.includes('sas') || title.includes('clinical') || title.includes('biostat') || title.includes('regulatory') || title.includes('cra') || title.includes('pv') || title.includes('pharma') || title.includes('gxp')) {
+    return 'Clinical Operations & Trials';
+  }
+  return 'Other Technologies';
+}
+
 export const BASELINE_JOBS: Array<{ company: 'AaraTech' | 'ClinisolTech'; jobId: string; jobTitle: string }> = [
   // AaraTech (21 Jobs)
   { company: 'AaraTech', jobId: 'AT-001', jobTitle: 'Senior Full Stack Engineer' },
@@ -74,8 +137,28 @@ export const DEFAULT_RECRUITERS: Array<{ company: 'AaraTech' | 'ClinisolTech'; n
 export class DatabaseService {
   private db: DatabaseSync;
 
-  constructor() {
-    this.db = new DatabaseSync(DB_PATH);
+  constructor(customDbPath?: string) {
+    let resolvedDbPath = customDbPath || DB_PATH;
+    if (process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      try {
+        const tmpPath = path.resolve('/tmp', 'linkedin_screening.db');
+        if (!fs.existsSync(tmpPath) && fs.existsSync(DB_PATH)) {
+          fs.copyFileSync(DB_PATH, tmpPath);
+        }
+        if (fs.existsSync(tmpPath)) {
+          resolvedDbPath = tmpPath;
+        }
+      } catch (err) {
+        console.warn('Vercel serverless DB setup note:', err);
+      }
+    }
+    this.db = new DatabaseSync(resolvedDbPath);
+    try {
+      this.db.exec(`PRAGMA busy_timeout = 30000;`);
+      this.db.exec(`PRAGMA journal_mode = WAL;`);
+    } catch (e) {
+      console.warn('PRAGMA init warning:', e);
+    }
     this.initTables();
     this.initDefaultRules();
     this.ensureReferenceMatchingInitialized();
@@ -205,24 +288,24 @@ export class DatabaseService {
     // Safe migration: Add gender column to existing database if absent, then index it
     try {
       this.db.exec("ALTER TABLE applicants ADD COLUMN gender TEXT DEFAULT 'UNSPECIFIED';");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_gender ON applicants(gender);");
-    } catch {}
+    } catch { }
 
     // Safe migration: Add company column for workspace isolation (AaraTech vs ClinisolTech)
     try {
       this.db.exec("ALTER TABLE applicants ADD COLUMN company TEXT DEFAULT 'AaraTech';");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("ALTER TABLE imports ADD COLUMN company TEXT DEFAULT 'AaraTech';");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_company ON applicants(company);");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_imports_company ON imports(company);");
-    } catch {}
+    } catch { }
 
     // Safe migration: Add workflow, batch, duplicate & recruiter columns to applicants
     const newApplicantCols = [
@@ -237,20 +320,20 @@ export class DatabaseService {
       "ALTER TABLE applicants ADD COLUMN review_notes TEXT;",
     ];
     for (const sql of newApplicantCols) {
-      try { this.db.exec(sql); } catch {}
+      try { this.db.exec(sql); } catch { }
     }
     try {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_batch_id ON applicants(batch_id);");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_app_date ON applicants(application_date);");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_master_person ON applicants(master_person_id);");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_recruiter ON applicants(assigned_recruiter);");
-    } catch {}
+    } catch { }
 
     // Safe migration: Add workflow columns to imports
     const newImportCols = [
@@ -259,15 +342,17 @@ export class DatabaseService {
       "ALTER TABLE imports ADD COLUMN active_working_batch INTEGER DEFAULT 1;",
     ];
     for (const sql of newImportCols) {
-      try { this.db.exec(sql); } catch {}
+      try { this.db.exec(sql); } catch { }
     }
 
     // Safe migration: Add link status & error columns
-    try { this.db.exec("ALTER TABLE applicants ADD COLUMN link_status TEXT DEFAULT 'Not Linked';"); } catch {}
-    try { this.db.exec("ALTER TABLE applicants ADD COLUMN link_error TEXT;"); } catch {}
-    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_link_status ON applicants(link_status);"); } catch {}
-    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_imports_app_date ON imports(application_date);"); } catch {}
-    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_company_appdate ON applicants(company, application_date);"); } catch {}
+    try { this.db.exec("ALTER TABLE applicants ADD COLUMN link_status TEXT DEFAULT 'Not Linked';"); } catch { }
+    try { this.db.exec("ALTER TABLE applicants ADD COLUMN link_error TEXT;"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_link_status ON applicants(link_status);"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_imports_app_date ON imports(application_date);"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_company_appdate ON applicants(company, application_date);"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_comp_res ON applicants(company, effective_result);"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_comp_date_res ON applicants(company, application_date, effective_result);"); } catch { }
     // Safe backfill: Resolve any unpopulated applicant ingestion dates from their import metadata
     try {
       this.db.exec(`
@@ -278,7 +363,7 @@ export class DatabaseService {
         WHERE (application_date IS NULL OR application_date = '')
           AND import_id IN (SELECT id FROM imports WHERE application_date IS NOT NULL AND application_date != '');
       `);
-    } catch {}
+    } catch { }
     try {
       this.db.exec(`
         UPDATE applicants
@@ -288,8 +373,8 @@ export class DatabaseService {
         WHERE (application_date IS NULL OR application_date = '')
           AND import_id IN (SELECT id FROM imports WHERE uploaded_at IS NOT NULL AND uploaded_at != '');
       `);
-    } catch {}
-    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_link_status ON applicants(link_status);"); } catch {}
+    } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_link_status ON applicants(link_status);"); } catch { }
 
     // Master Candidate Database Tables
     this.db.exec(`
@@ -423,27 +508,27 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_incomplete_records_import ON incomplete_records(import_id);
     `);
 
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN secondary_email TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN secondary_phone TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_person_emails ADD COLUMN source TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_person_emails ADD COLUMN first_seen_at TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_person_emails ADD COLUMN last_seen_at TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_person_phones ADD COLUMN source TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_person_phones ADD COLUMN first_seen_at TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_person_phones ADD COLUMN last_seen_at TEXT;"); } catch {}
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN secondary_email TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN secondary_phone TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_person_emails ADD COLUMN source TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_person_emails ADD COLUMN first_seen_at TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_person_emails ADD COLUMN last_seen_at TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_person_phones ADD COLUMN source TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_person_phones ADD COLUMN first_seen_at TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_person_phones ADD COLUMN last_seen_at TEXT;"); } catch { }
 
     // Master Candidate Database Enhancements: Assignments, Classified URLs & Distinct Dates
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN resume_url TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN unclassified_links TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN application_collected_date TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN recruiter_assigned_date TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN first_assigned_recruiter TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN first_confirmed_contacted_by TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN last_contacted_by TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN latest_contact_outcome TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN last_assignment_date TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN last_contact_date TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN resume_link TEXT;"); } catch {}
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN resume_url TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN unclassified_links TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN application_collected_date TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN recruiter_assigned_date TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN first_assigned_recruiter TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN first_confirmed_contacted_by TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN last_contacted_by TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN latest_contact_outcome TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN last_assignment_date TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN last_contact_date TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN resume_link TEXT;"); } catch { }
 
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS master_recruiter_assignments (
@@ -459,32 +544,32 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_mra_person ON master_recruiter_assignments(person_id);
     `);
 
-    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN contact_method TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN outcome TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN feedback_1 TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN feedback_2 TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN additional_feedback TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN next_follow_up TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN raw_feedback TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN source_file TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN created_by TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN application_id TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN source_row_number INTEGER;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_assignments ADD COLUMN application_id TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_assignments ADD COLUMN source_row_number INTEGER;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_recruiter_assignments ADD COLUMN source_file TEXT;"); } catch {}
-    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_mrc_app ON master_recruiter_contacts(application_id);"); } catch {}
-    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_mra_app ON master_recruiter_assignments(application_id);"); } catch {}
+    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN contact_method TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN outcome TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN feedback_1 TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN feedback_2 TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN additional_feedback TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN next_follow_up TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN raw_feedback TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN source_file TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN created_by TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN application_id TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_contacts ADD COLUMN source_row_number INTEGER;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_assignments ADD COLUMN application_id TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_assignments ADD COLUMN source_row_number INTEGER;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_recruiter_assignments ADD COLUMN source_file TEXT;"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_mrc_app ON master_recruiter_contacts(application_id);"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_mra_app ON master_recruiter_assignments(application_id);"); } catch { }
 
-    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN application_collected_date TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN recruiter_assigned_date TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN assigned_recruiter TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN resume_url TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN unclassified_links TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN green_card TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_people ADD COLUMN h1b_status TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN green_card TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN h1b_status TEXT;"); } catch {}
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN application_collected_date TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN recruiter_assigned_date TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN assigned_recruiter TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN resume_url TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN unclassified_links TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN green_card TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_people ADD COLUMN h1b_status TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN green_card TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN h1b_status TEXT;"); } catch { }
 
     // Phase 2: Master Transfers Table for Controlled, Idempotent Transfer Pipeline (Prompt Section 5 & 18)
     this.db.exec(`
@@ -505,25 +590,108 @@ export class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_mt_applicant ON master_transfers(screening_applicant_id);
       CREATE INDEX IF NOT EXISTS idx_mt_company_batch ON master_transfers(company, batch_id);
       CREATE INDEX IF NOT EXISTS idx_mt_status ON master_transfers(transfer_status);
+
+      -- Master Import Ledger for Complete Row-Level Auditability & Idempotent Resumption (Prompt Section 6)
+      CREATE TABLE IF NOT EXISTS master_import_ledger (
+        id TEXT PRIMARY KEY,
+        import_id TEXT NOT NULL,
+        source_file TEXT NOT NULL,
+        sheet_name TEXT,
+        row_number INTEGER NOT NULL,
+        company TEXT NOT NULL,
+        normalized_identity TEXT,
+        raw_name TEXT,
+        raw_email TEXT,
+        raw_phone TEXT,
+        raw_role TEXT,
+        status TEXT NOT NULL,
+        person_id TEXT,
+        application_id TEXT,
+        error_details TEXT,
+        processed_at TEXT NOT NULL,
+        UNIQUE(company, source_file, sheet_name, row_number)
+      );
+      CREATE INDEX IF NOT EXISTS idx_mil_import ON master_import_ledger(import_id);
+      CREATE INDEX IF NOT EXISTS idx_mil_status ON master_import_ledger(status);
+      CREATE INDEX IF NOT EXISTS idx_mil_identity ON master_import_ledger(company, normalized_identity);
+
+      -- Master Import Jobs & Batch Tracking Architecture for Scalable & Resumable Imports
+      CREATE TABLE IF NOT EXISTS master_import_jobs (
+        id TEXT PRIMARY KEY,
+        company TEXT NOT NULL,
+        source_file TEXT,
+        sheet_name TEXT,
+        total_rows INTEGER DEFAULT 0,
+        processed_rows INTEGER DEFAULT 0,
+        successful_rows INTEGER DEFAULT 0,
+        failed_rows INTEGER DEFAULT 0,
+        new_candidates INTEGER DEFAULT 0,
+        matched_candidates INTEGER DEFAULT 0,
+        new_applications INTEGER DEFAULT 0,
+        matched_applications INTEGER DEFAULT 0,
+        duplicate_applications INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'Pending',
+        error_summary TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_mij_company ON master_import_jobs(company);
+      CREATE INDEX IF NOT EXISTS idx_mij_status ON master_import_jobs(status);
+
+      CREATE TABLE IF NOT EXISTS master_import_batches (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        batch_number INTEGER NOT NULL,
+        start_row INTEGER NOT NULL,
+        end_row INTEGER NOT NULL,
+        record_count INTEGER NOT NULL,
+        row_count INTEGER,
+        successful_count INTEGER DEFAULT 0,
+        failed_count INTEGER DEFAULT 0,
+        new_candidates INTEGER DEFAULT 0,
+        matched_candidates INTEGER DEFAULT 0,
+        new_applications INTEGER DEFAULT 0,
+        duplicate_applications INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'Pending',
+        error_details TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        created_at TEXT,
+        FOREIGN KEY (job_id) REFERENCES master_import_jobs(id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_mib_job ON master_import_batches(job_id);
     `);
 
+    // Master import and application safe schema migrations
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN normalized_role TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN source_row_number INTEGER;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_import_ledger ADD COLUMN job_id TEXT;"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_mil_job ON master_import_ledger(job_id);"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_mp_comp_email ON master_people(company, primary_email);"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_mp_comp_phone ON master_people(company, primary_phone);"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_mp_comp_pid ON master_people(company, person_id);"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_ma_comp_pid_title ON master_applications(company, person_id, job_title);"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_ma_comp_date ON master_applications(company, date_applied);"); } catch { }
+
     // Transfer status and tracking columns on applicants table
-    try { this.db.exec("ALTER TABLE applicants ADD COLUMN transfer_status TEXT DEFAULT 'Not Transferred';"); } catch {}
-    try { this.db.exec("ALTER TABLE applicants ADD COLUMN transferred_at TEXT;"); } catch {}
-    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_transfer_status ON applicants(transfer_status);"); } catch {}
+    try { this.db.exec("ALTER TABLE applicants ADD COLUMN transfer_status TEXT DEFAULT 'Not Transferred';"); } catch { }
+    try { this.db.exec("ALTER TABLE applicants ADD COLUMN transferred_at TEXT;"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_transfer_status ON applicants(transfer_status);"); } catch { }
 
     // Master application enhancements for technology analytics & traceability (Prompt Section 6 & 16)
-    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN technology TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN source_batch_id TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN screening_applicant_id TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN transfer_id TEXT;"); } catch {}
-    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_ma_tech ON master_applications(technology);"); } catch {}
-    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_ma_screening_applicant ON master_applications(screening_applicant_id);"); } catch {}
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN technology TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN source_batch_id TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN screening_applicant_id TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE master_applications ADD COLUMN transfer_id TEXT;"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_ma_tech ON master_applications(technology);"); } catch { }
+    try { this.db.exec("CREATE INDEX IF NOT EXISTS idx_ma_screening_applicant ON master_applications(screening_applicant_id);"); } catch { }
 
     // Imports enhancements for re-import protection & transfer statistics (Prompt Section 15)
-    try { this.db.exec("ALTER TABLE imports ADD COLUMN file_hash TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE imports ADD COLUMN content_fingerprint TEXT;"); } catch {}
-    try { this.db.exec("ALTER TABLE imports ADD COLUMN transferred_count INTEGER DEFAULT 0;"); } catch {}
+    try { this.db.exec("ALTER TABLE imports ADD COLUMN file_hash TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE imports ADD COLUMN content_fingerprint TEXT;"); } catch { }
+    try { this.db.exec("ALTER TABLE imports ADD COLUMN transferred_count INTEGER DEFAULT 0;"); } catch { }
 
     // Create Jobs table and Recruiters table for strict company-scoped operations
     this.db.exec(`
@@ -563,7 +731,7 @@ export class DatabaseService {
           insertJob.run(`job-${j.jobId.toLowerCase()}`, j.company, j.jobId, j.jobTitle);
         }
       }
-    } catch {}
+    } catch { }
 
     // Seed initial recruiters for AaraTech & ClinisolTech if table empty
     try {
@@ -577,118 +745,262 @@ export class DatabaseService {
           insertRec.run(`rec-${Math.random().toString(36).substring(2, 9)}`, r.company, r.name, r.email, r.role);
         }
       }
-    } catch {}
+    } catch { }
+
+    // Digital Marketing Enterprise Persistence Tables
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS marketing_members (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        designation TEXT,
+        company_access TEXT,
+        is_active INTEGER DEFAULT 1,
+        avatar_initials TEXT,
+        created_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS marketing_attendance (
+        id TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL,
+        member_name TEXT NOT NULL,
+        company TEXT NOT NULL,
+        work_date TEXT NOT NULL,
+        check_in_time TEXT NOT NULL,
+        check_out_time TEXT,
+        total_hours REAL,
+        status TEXT NOT NULL,
+        notes TEXT,
+        breaks_json TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_mkt_att_member ON marketing_attendance(member_id);
+      CREATE INDEX IF NOT EXISTS idx_mkt_att_date ON marketing_attendance(work_date);
+      CREATE INDEX IF NOT EXISTS idx_mkt_att_company ON marketing_attendance(company);
+
+      CREATE TABLE IF NOT EXISTS marketing_tasks (
+        id TEXT PRIMARY KEY,
+        company TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        assigned_to_id TEXT,
+        assigned_to_name TEXT,
+        priority TEXT,
+        status TEXT,
+        due_date TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_mkt_tasks_company ON marketing_tasks(company);
+      CREATE INDEX IF NOT EXISTS idx_mkt_tasks_status ON marketing_tasks(status);
+
+      CREATE TABLE IF NOT EXISTS marketing_posts (
+        id TEXT PRIMARY KEY,
+        company TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        media_urls TEXT,
+        scheduled_for TEXT,
+        approval_status TEXT,
+        author_id TEXT,
+        author_name TEXT,
+        reviewer_id TEXT,
+        reviewer_name TEXT,
+        reviewer_feedback TEXT,
+        published_at TEXT,
+        live_post_url TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_mkt_posts_company ON marketing_posts(company);
+      CREATE INDEX IF NOT EXISTS idx_mkt_posts_status ON marketing_posts(approval_status);
+
+      CREATE TABLE IF NOT EXISTS marketing_reports (
+        id TEXT PRIMARY KEY,
+        member_id TEXT NOT NULL,
+        member_name TEXT NOT NULL,
+        company TEXT NOT NULL,
+        report_date TEXT NOT NULL,
+        tasks_completed TEXT,
+        in_progress_tasks TEXT,
+        blockers TEXT,
+        key_learnings TEXT,
+        hours_worked REAL,
+        created_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_mkt_rep_member ON marketing_reports(member_id);
+      CREATE INDEX IF NOT EXISTS idx_mkt_rep_date ON marketing_reports(report_date);
+
+      CREATE TABLE IF NOT EXISTS marketing_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TEXT
+      );
+    `);
+
+    this.initDefaultMarketing();
 
     // Safe migration: Add origin columns for South Asian profile filtering
     try {
       this.db.exec("ALTER TABLE applicants ADD COLUMN origin_region TEXT DEFAULT 'UNSPECIFIED';");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("ALTER TABLE applicants ADD COLUMN origin_country TEXT;");
-    } catch {}
+    } catch { }
+
+    // Auto-rotate any older daily working batches based on EST (America/New_York)
+    try {
+      this.autoRotateDailyBatchesEST();
+    } catch { }
     try {
       this.db.exec("ALTER TABLE applicants ADD COLUMN origin_match_reason TEXT;");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_origin_region ON applicants(origin_region);");
-    } catch {}
+    } catch { }
 
     // Safe migration: Add reference name matching columns
     try {
       this.db.exec("ALTER TABLE applicants ADD COLUMN name_match_category TEXT DEFAULT 'No Match';");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("ALTER TABLE applicants ADD COLUMN name_match_score REAL DEFAULT 0;");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("ALTER TABLE applicants ADD COLUMN name_matched_pattern TEXT;");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("ALTER TABLE applicants ADD COLUMN name_matched_reference TEXT;");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_name_match_category ON applicants(name_match_category);");
-    } catch {}
+    } catch { }
 
     // Safe migration: Add normalized_role column to applicants
     try {
       this.db.exec("ALTER TABLE applicants ADD COLUMN normalized_role TEXT;");
-    } catch {}
+    } catch { }
     try {
       this.db.exec("CREATE INDEX IF NOT EXISTS idx_applicants_normalized_role ON applicants(normalized_role);");
-    } catch {}
+    } catch { }
 
-    // Auto-repair & backfill existing records: normalized_role & reference name matching
+    // One-time startup backfill & reevaluation (gated in app_settings so server restarts don't lock or rewrite 7,500+ rows every boot)
+    let startupBackfillDone = false;
     try {
-      const needRoleOrMatch = this.db.prepare(`
-        SELECT id, first_name, last_name, full_name, job_title, current_title, headline, source_file, name_match_category, name_match_score, normalized_role
-        FROM applicants
-        WHERE (normalized_role IS NULL OR normalized_role = '')
-           OR (name_match_category IS NULL OR name_match_category = 'No Match' OR name_match_score = 0)
-      `).all() as any[];
+      const flag = this.db.prepare("SELECT value FROM app_settings WHERE key = 'startup_backfill_v1_done'").get() as { value?: string } | undefined;
+      startupBackfillDone = flag?.value === '1';
+    } catch { }
 
-      if (needRoleOrMatch && needRoleOrMatch.length > 0) {
-        const updateStmt = this.db.prepare(`
-          UPDATE applicants
-          SET normalized_role = ?,
-              name_match_category = ?,
-              name_match_score = ?,
-              name_matched_pattern = ?,
-              name_matched_reference = ?
-          WHERE id = ?
+    if (!startupBackfillDone) {
+      try {
+        const needRoleOrMatch = this.db.prepare(`
+          SELECT id, first_name, last_name, full_name, job_title, current_title, headline, source_file, name_match_category, name_match_score, normalized_role
+          FROM applicants
+          WHERE (normalized_role IS NULL OR normalized_role = '')
+             OR (name_match_category IS NULL OR name_match_category = '')
+        `).all() as any[];
+
+        if (needRoleOrMatch && needRoleOrMatch.length > 0) {
+          this.db.exec('BEGIN TRANSACTION');
+          try {
+            const updateStmt = this.db.prepare(`
+              UPDATE applicants
+              SET normalized_role = ?,
+                  name_match_category = ?,
+                  name_match_score = ?,
+                  name_matched_pattern = ?,
+                  name_matched_reference = ?
+              WHERE id = ?
+            `);
+            for (const row of needRoleOrMatch) {
+              const fn = row.full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim();
+              const normRole = row.normalized_role || normalizeJobRole(row.job_title || '', [row.current_title, row.headline, row.source_file].filter(Boolean).join(' '));
+              const matchRes = referenceNameMatcher.evaluate(fn);
+              updateStmt.run(
+                normRole,
+                matchRes.category,
+                matchRes.score,
+                matchRes.matchedPattern,
+                matchRes.matchedReferenceName,
+                row.id
+              );
+            }
+            this.db.exec('COMMIT');
+          } catch {
+            try { this.db.exec('ROLLBACK'); } catch { }
+          }
+        }
+      } catch (err) {
+        console.warn('[initDb] Auto-repair backfill notice:', err);
+      }
+
+      // Safe migration: sanitize existing phone numbers to remove +1 and symbols
+      try {
+        const phoneRows = this.db.prepare("SELECT id, phone FROM applicants WHERE phone IS NOT NULL AND phone != ''").all() as any[];
+        if (phoneRows.length > 0) {
+          this.db.exec('BEGIN TRANSACTION');
+          try {
+            const updatePhoneStmt = this.db.prepare("UPDATE applicants SET phone = ? WHERE id = ?");
+            for (const row of phoneRows) {
+              const cleaned = sanitizeContactNumber(row.phone);
+              if (cleaned !== row.phone) {
+                updatePhoneStmt.run(cleaned, row.id);
+              }
+            }
+            this.db.exec('COMMIT');
+          } catch {
+            try { this.db.exec('ROLLBACK'); } catch { }
+          }
+        }
+      } catch { }
+
+      // Safe migration: add batch_name column to imports and populate for existing rows
+      try {
+        this.db.exec("ALTER TABLE imports ADD COLUMN batch_name TEXT;");
+      } catch { }
+      try {
+        this.db.exec(`
+          UPDATE imports
+          SET batch_name = (
+            SELECT COALESCE(NULLIF(job_title, ''), NULLIF(filename, ''), 'Import Batch')
+            FROM import_files
+            WHERE import_id = imports.id
+            LIMIT 1
+          )
+          WHERE batch_name IS NULL OR batch_name = '';
         `);
-        for (const row of needRoleOrMatch) {
-          const fn = row.full_name || `${row.first_name || ''} ${row.last_name || ''}`.trim();
-          const normRole = row.normalized_role || normalizeJobRole(row.job_title || '', [row.current_title, row.headline, row.source_file].filter(Boolean).join(' '));
-          const matchRes = referenceNameMatcher.evaluate(fn);
-          updateStmt.run(
-            normRole,
-            matchRes.category,
-            matchRes.score,
-            matchRes.matchedPattern,
-            matchRes.matchedReferenceName,
-            row.id
-          );
-        }
+      } catch { }
+
+      // Safe self-healing migration: Restore statutory screening results for duplicate records where effective_result was previously overwritten to FAIL
+      try {
+        this.db.exec(`
+          UPDATE applicants 
+          SET effective_result = automated_result 
+          WHERE manual_result IS NULL 
+            AND is_duplicate = 1 
+            AND automated_result IN ('PASS', 'MANUAL_REVIEW') 
+            AND effective_result = 'FAIL';
+        `);
+      } catch { }
+
+      // Synchronize and reevaluate all applicants with the latest Origin Rule and Reference Name Matcher
+      try {
+        this.reevaluateAllApplicants();
+      } catch (err) {
+        console.warn('[initDb] Initial applicant reevaluation notice:', err);
       }
-    } catch (err) {
-      console.warn('[initDb] Auto-repair backfill notice:', err);
-    }
 
-    // Safe migration: sanitize existing phone numbers to remove +1 and symbols
-    try {
-      const phoneRows = this.db.prepare("SELECT id, phone FROM applicants WHERE phone IS NOT NULL AND phone != ''").all() as any[];
-      const updatePhoneStmt = this.db.prepare("UPDATE applicants SET phone = ? WHERE id = ?");
-      for (const row of phoneRows) {
-        const cleaned = sanitizeContactNumber(row.phone);
-        if (cleaned !== row.phone) {
-          updatePhoneStmt.run(cleaned, row.id);
-        }
-      }
-    } catch {}
-
-    // Safe migration: add batch_name column to imports and populate for existing rows
-    try {
-      this.db.exec("ALTER TABLE imports ADD COLUMN batch_name TEXT;");
-    } catch {}
-    try {
-      this.db.exec(`
-        UPDATE imports
-        SET batch_name = (
-          SELECT COALESCE(NULLIF(job_title, ''), NULLIF(filename, ''), 'Import Batch')
-          FROM import_files
-          WHERE import_id = imports.id
-          LIMIT 1
-        )
-        WHERE batch_name IS NULL OR batch_name = '';
-      `);
-    } catch {}
-
-    // Synchronize and reevaluate all applicants with the latest Origin Rule and Reference Name Matcher
-    try {
-      this.reevaluateAllApplicants();
-    } catch (err) {
-      console.warn('[initDb] Initial applicant reevaluation notice:', err);
+      try {
+        this.db.prepare(`
+          INSERT INTO app_settings (key, value, updated_at)
+          VALUES ('startup_backfill_v1_done', '1', datetime('now'))
+          ON CONFLICT(key) DO UPDATE SET value = '1', updated_at = datetime('now')
+        `).run();
+      } catch { }
+    } else {
+      try { this.db.exec("ALTER TABLE imports ADD COLUMN batch_name TEXT;"); } catch { }
     }
   }
 
@@ -771,7 +1083,7 @@ export class DatabaseService {
           'SOUTH_ASIAN_ORIGIN'
         );
       }
-    } catch {}
+    } catch { }
   }
 
   // --- Screening Rules ---
@@ -876,10 +1188,11 @@ export class DatabaseService {
     applicationDate?: string,
     jobSlots?: string[]
   ): void {
-    // Reset any other active_working_batch for this company to 0, so this new batch is the active one!
+    // Only reset batches from PREVIOUS days for this company, keeping all today's batches active together!
     try {
-      this.db.prepare('UPDATE imports SET active_working_batch = 0 WHERE company = ?').run(company);
-    } catch {}
+      const todayEST = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+      this.db.prepare('UPDATE imports SET active_working_batch = 0 WHERE company = ? AND application_date < ?').run(company, todayEST);
+    } catch { }
 
     const insertImport = this.db.prepare(`
       INSERT INTO imports (
@@ -963,45 +1276,109 @@ export class DatabaseService {
 
     this.db.exec('BEGIN TRANSACTION');
     try {
-      // 1. Existing candidate lookup maps strictly within this company workspace
+      // 1. Pre-load Master Candidate DB records strictly within this company workspace
+      const masterPeople = this.db.prepare('SELECT id, person_id, full_name, primary_email, primary_phone, linkedin_url FROM master_people WHERE company = ?').all(company) as any[];
+      const masterEmails = this.db.prepare(`
+        SELECT e.person_id, e.email, e.normalized_email 
+        FROM master_person_emails e
+        JOIN master_people p ON p.id = e.person_id
+        WHERE p.company = ?
+      `).all(company) as any[];
+      const masterPhones = this.db.prepare(`
+        SELECT ph.person_id, ph.phone_original, ph.phone_normalized 
+        FROM master_person_phones ph
+        JOIN master_people p ON p.id = ph.person_id
+        WHERE p.company = ?
+      `).all(company) as any[];
+      const masterApps = this.db.prepare('SELECT person_id, job_id, job_title, technology, date_applied, source_file, screening_applicant_id FROM master_applications WHERE company = ?').all(company) as any[];
+
+      const masterEmailToPerson = new Map<string, any>();
+      const masterPhoneNameToPerson = new Map<string, any>();
+      const masterLiToPerson = new Map<string, any>();
+      const masterNameToPeople = new Map<string, any[]>();
+      const masterAppsByPerson = new Map<string, any[]>();
+
+      for (const p of masterPeople) {
+        if (p.primary_email) masterEmailToPerson.set(p.primary_email.trim().toLowerCase(), p);
+        const nm = (p.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        if (nm) {
+          const list = masterNameToPeople.get(nm) || [];
+          list.push(p);
+          masterNameToPeople.set(nm, list);
+        }
+        if (p.primary_phone && nm) {
+          const cleanPh = p.primary_phone.replace(/\D/g, '').slice(-10);
+          if (cleanPh.length >= 7) masterPhoneNameToPerson.set(`${cleanPh}:::${nm}`, p);
+        }
+        const li = cleanLinkedinIdentifier(p.linkedin_url);
+        if (li && li.length >= 3) masterLiToPerson.set(li, p);
+      }
+
+      for (const e of masterEmails) {
+        const p = masterPeople.find(x => x.id === e.person_id || x.person_id === e.person_id);
+        const nEmail = (e.normalized_email || e.email || '').trim().toLowerCase();
+        if (p && nEmail) masterEmailToPerson.set(nEmail, p);
+      }
+
+      for (const ph of masterPhones) {
+        const p = masterPeople.find(x => x.id === ph.person_id || x.person_id === ph.person_id);
+        const cleanPh = (ph.phone_normalized || ph.phone_original || '').replace(/\D/g, '').slice(-10);
+        if (p && cleanPh.length >= 7) {
+          const nm = (p.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+          if (nm) masterPhoneNameToPerson.set(`${cleanPh}:::${nm}`, p);
+        }
+      }
+
+      for (const ma of masterApps) {
+        const list = masterAppsByPerson.get(ma.person_id) || [];
+        list.push(ma);
+        masterAppsByPerson.set(ma.person_id, list);
+      }
+
+      // 2. Pre-load historical screening applicant records for this company
       const existingRows = this.db.prepare(`
-        SELECT id, full_name, email, phone, profile_url, job_id, job_title, master_person_id, effective_result, automated_result
+        SELECT id, full_name, email, phone, profile_url, job_id, job_title, normalized_role, master_person_id, is_duplicate
         FROM applicants
         WHERE company = ?
       `).all(company) as any[];
 
-      const emailMap = new Map<string, any>();
-      const emailJobsMap = new Map<string, Set<string>>();
-      const linkedinMap = new Map<string, any>();
-      const linkedinJobsMap = new Map<string, Set<string>>();
-      const namePhoneMap = new Map<string, any>();
-      const namePhoneJobsMap = new Map<string, Set<string>>();
+      const histEmailToApp = new Map<string, any>();
+      const histEmailSlots = new Map<string, Set<string>>();
+      const histPhoneNameToApp = new Map<string, any>();
+      const histPhoneNameSlots = new Map<string, Set<string>>();
+      const histLiToApp = new Map<string, any>();
+      const histLiSlots = new Map<string, Set<string>>();
 
       for (const r of existingRows) {
         const em = (r.email || '').trim().toLowerCase();
-        const jKey = (r.job_id || r.job_title || '').trim().toLowerCase();
+        const sId = (r.job_id || '').trim().toUpperCase();
+        const rRole = (r.normalized_role || normalizeJobRole(r.job_title) || '').trim().toLowerCase();
+
         if (em && em !== 'n/a' && em !== 'none' && em.includes('@')) {
-          emailMap.set(em, r);
-          if (!emailJobsMap.has(em)) emailJobsMap.set(em, new Set());
-          if (jKey) emailJobsMap.get(em)!.add(jKey);
+          histEmailToApp.set(em, r);
+          if (!histEmailSlots.has(em)) histEmailSlots.set(em, new Set());
+          if (sId) histEmailSlots.get(em)!.add(sId);
+          if (rRole) histEmailSlots.get(em)!.add(rRole);
         }
         const li = cleanLinkedinIdentifier(r.profile_url);
         if (li && li.length >= 3) {
-          linkedinMap.set(li, r);
-          if (!linkedinJobsMap.has(li)) linkedinJobsMap.set(li, new Set());
-          if (jKey) linkedinJobsMap.get(li)!.add(jKey);
+          histLiToApp.set(li, r);
+          if (!histLiSlots.has(li)) histLiSlots.set(li, new Set());
+          if (sId) histLiSlots.get(li)!.add(sId);
+          if (rRole) histLiSlots.get(li)!.add(rRole);
         }
         const ph = (r.phone || '').replace(/\D/g, '').slice(-10);
         const nm = (r.full_name || '').trim().toLowerCase().replace(/\s+/g, ' ');
         if (nm && ph.length >= 7) {
-          const npKey = `${nm}|${ph}`;
-          namePhoneMap.set(npKey, r);
-          if (!namePhoneJobsMap.has(npKey)) namePhoneJobsMap.set(npKey, new Set());
-          if (jKey) namePhoneJobsMap.get(npKey)!.add(jKey);
+          const npKey = `${ph}:::${nm}`;
+          histPhoneNameToApp.set(npKey, r);
+          if (!histPhoneNameSlots.has(npKey)) histPhoneNameSlots.set(npKey, new Set());
+          if (sId) histPhoneNameSlots.get(npKey)!.add(sId);
+          if (rRole) histPhoneNameSlots.get(npKey)!.add(rRole);
         }
       }
 
-      // 2. Intra-batch tracking to prevent identical row re-insertion
+      // 3. Intra-batch tracking to prevent identical row re-insertion
       const seenBatchJobKeys = new Set<string>();
 
       const stmt = this.db.prepare(`
@@ -1043,42 +1420,99 @@ export class DatabaseService {
         const li = cleanLinkedinIdentifier(a.profileUrl);
         const ph = (a.phone || '').replace(/\D/g, '').slice(-10);
         const nm = (a.fullName || `${a.firstName || ''} ${a.lastName || ''}`).trim().toLowerCase().replace(/\s+/g, ' ');
-        const curJobKey = (a.jobId || a.jobTitle || '').trim().toLowerCase();
-
-        // Check if candidate exists in Master Candidate DB for this company
-        let existingRecord: any = null;
-        let appliedJobs: Set<string> | undefined;
-
-        if (em && emailMap.has(em)) {
-          existingRecord = emailMap.get(em);
-          appliedJobs = emailJobsMap.get(em);
-        } else if (li && linkedinMap.has(li)) {
-          existingRecord = linkedinMap.get(li);
-          appliedJobs = linkedinJobsMap.get(li);
-        } else if (nm && ph.length >= 7 && namePhoneMap.has(`${nm}|${ph}`)) {
-          existingRecord = namePhoneMap.get(`${nm}|${ph}`);
-          appliedJobs = namePhoneJobsMap.get(`${nm}|${ph}`);
-        }
+        const sId = (a.jobId || '').trim().toUpperCase();
+        const curRole = (a.normalizedRole || normalizeJobRole(a.jobTitle) || '').trim().toLowerCase();
+        const candKey = (em && em.includes('@') && !['unknown', 'n/a', 'none'].includes(em))
+          ? `email:${em}`
+          : ((ph.length >= 7 && nm) ? `phone:${ph}:::${nm}` : (li ? `li:${li}` : ''));
+        const slotKey = candKey && sId ? `${candKey}::${sId}` : '';
+        const roleKey = candKey && curRole ? `${candKey}::${curRole}` : '';
 
         let isDuplicate = 0;
         let duplicateReason: string | null = null;
-        const masterPersonId = existingRecord
-          ? (existingRecord.master_person_id || existingRecord.id)
-          : `P-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+        let masterPersonId: string | null = null;
+        let possibleDuplicate = false;
 
-        // Re-upload detection: Check if already applied to the SAME job slot
-        const candidateKey = em || li || `${nm}|${ph}`;
-        const candidateJobKey = `${candidateKey}::${curJobKey}`;
-
-        if (seenBatchJobKeys.has(candidateJobKey)) {
+        // 1. Intra-batch duplicate check
+        if (slotKey && seenBatchJobKeys.has(slotKey)) {
           isDuplicate = 1;
           duplicateReason = `Duplicate submission within current batch for job slot (${a.jobTitle || a.jobId})`;
-        } else if (appliedJobs && curJobKey && appliedJobs.has(curJobKey)) {
+        } else if (roleKey && seenBatchJobKeys.has(roleKey)) {
           isDuplicate = 1;
-          duplicateReason = `Candidate already applied to job slot (${a.jobTitle || a.jobId}) in ${company}`;
+          duplicateReason = `Duplicate submission within current batch for job role (${a.jobTitle || curRole})`;
         }
 
-        if (candidateJobKey) seenBatchJobKeys.add(candidateJobKey);
+        // 2. Master Candidate DB matching
+        let matchedMasterPerson: any = null;
+        if (em && masterEmailToPerson.has(em)) {
+          matchedMasterPerson = masterEmailToPerson.get(em);
+        } else if (ph.length >= 7 && nm && masterPhoneNameToPerson.has(`${ph}:::${nm}`)) {
+          matchedMasterPerson = masterPhoneNameToPerson.get(`${ph}:::${nm}`);
+        } else if (li && masterLiToPerson.has(li)) {
+          matchedMasterPerson = masterLiToPerson.get(li);
+        }
+
+        if (matchedMasterPerson) {
+          masterPersonId = matchedMasterPerson.person_id;
+          // Check if candidate already has an application occurrence in Master DB for this slot/role
+          if (!isDuplicate) {
+            const pApps = masterAppsByPerson.get(matchedMasterPerson.person_id) || masterAppsByPerson.get(matchedMasterPerson.id) || [];
+            const isSameMasterApp = pApps.some((ma: any) => {
+              if (sId && ma.job_id && ma.job_id.trim().toUpperCase() === sId) return true;
+              const maRole = (ma.technology || ma.job_title || '').trim().toLowerCase();
+              const normMaRole = normalizeJobRole(maRole).toLowerCase();
+              if (curRole && (curRole === maRole || curRole === normMaRole)) return true;
+              return false;
+            });
+
+            if (isSameMasterApp) {
+              isDuplicate = 1;
+              duplicateReason = `Candidate already applied to job slot (${a.jobTitle || a.jobId}) in Master Database (${matchedMasterPerson.person_id})`;
+            } else {
+              // Existing Master Candidate
+              isDuplicate = 1;
+              duplicateReason = `Candidate already exists in Master Database (${matchedMasterPerson.person_id} - ${matchedMasterPerson.full_name})`;
+            }
+          }
+        }
+
+        // 3. Historical batch duplicate check
+        if (!isDuplicate) {
+          let histMatch: any = null;
+          let histSlots: Set<string> | undefined;
+          if (em && histEmailToApp.has(em)) {
+            histMatch = histEmailToApp.get(em);
+            histSlots = histEmailSlots.get(em);
+          } else if (ph.length >= 7 && nm && histPhoneNameToApp.has(`${ph}:::${nm}`)) {
+            histMatch = histPhoneNameToApp.get(`${ph}:::${nm}`);
+            histSlots = histPhoneNameSlots.get(`${ph}:::${nm}`);
+          } else if (li && histLiToApp.has(li)) {
+            histMatch = histLiToApp.get(li);
+            histSlots = histLiSlots.get(li);
+          }
+
+          if (histMatch && histSlots) {
+            const isSameSlot = Boolean(sId && histSlots.has(sId));
+            const isSameRole = Boolean(curRole && histSlots.has(curRole));
+            if (isSameSlot || isSameRole) {
+              isDuplicate = 1;
+              duplicateReason = `Candidate already applied to job ${isSameRole ? `role (${curRole})` : `slot (${sId})`} in prior batch (${histMatch.import_id || 'earlier batch'})`;
+            }
+            if (!masterPersonId && histMatch.master_person_id) {
+              masterPersonId = histMatch.master_person_id;
+            }
+          }
+        }
+
+        // 4. Possible duplicate check (name match, different credentials)
+        if (!matchedMasterPerson && !isDuplicate && nm) {
+          if (masterNameToPeople.has(nm)) {
+            possibleDuplicate = true;
+          }
+        }
+
+        if (slotKey) seenBatchJobKeys.add(slotKey);
+        if (roleKey) seenBatchJobKeys.add(roleKey);
 
         const normalizedRole = a.normalizedRole || (a.jobTitle ? normalizeJobRole(a.jobTitle, [a.currentTitle, a.headline, a.sourceFile].filter(Boolean).join(' ')) : null);
 
@@ -1096,6 +1530,22 @@ export class DatabaseService {
           } catch (err) {
             console.warn('[insertApplicants] reference matching error:', err);
           }
+        }
+
+        // 5. Final effective result determination: Preserves statutory criteria evaluation (PASS, FAIL, MANUAL_REVIEW) regardless of duplicate status
+        let finalEffectiveResult: string;
+        if (a.manualResult) {
+          finalEffectiveResult = a.manualResult;
+        } else if (a.effectiveResult) {
+          finalEffectiveResult = a.effectiveResult;
+        } else if (a.automatedResult) {
+          finalEffectiveResult = a.automatedResult;
+        } else {
+          finalEffectiveResult = 'PASS';
+        }
+
+        if (finalEffectiveResult === 'PASS' && possibleDuplicate) {
+          finalEffectiveResult = 'MANUAL_REVIEW';
         }
 
         stmt.run(
@@ -1146,7 +1596,7 @@ export class DatabaseService {
           nameMatch.matchedReferenceName ?? null,
           a.automatedResult ?? null,
           a.manualResult ?? null,
-          a.effectiveResult ?? null,
+          finalEffectiveResult,
           a.screeningReasons ?? null,
           a.overrideReason ?? null,
           a.overriddenBy ?? null,
@@ -1159,29 +1609,35 @@ export class DatabaseService {
           targetAppDate ?? null,
           a.assignedRecruiter ?? null,
           a.distributedAt ?? null,
-          isDuplicate ?? 0,
-          duplicateReason ?? null,
-          masterPersonId ?? null,
-          (a.reviewDecision || (a.effectiveResult === 'PASS' ? 'APPROVED' : null)) ?? null,
-          a.reviewNotes ?? null
+          isDuplicate,
+          duplicateReason,
+          masterPersonId,
+          (a.reviewDecision || (finalEffectiveResult === 'PASS' ? 'APPROVED' : null)) ?? null,
+          a.reviewNotes ?? (possibleDuplicate ? 'Possible duplicate candidate: name matches existing profile with different contact credentials' : null)
         );
 
-        // Add to lookup maps
+        // Add newly inserted applicant to in-memory lookup maps for intra-batch deduplication
+        if (slotKey) seenBatchJobKeys.add(slotKey);
+        if (roleKey) seenBatchJobKeys.add(roleKey);
+        if (roleKey) seenBatchJobKeys.add(roleKey);
         if (em && em.includes('@')) {
-          emailMap.set(em, { id: a.id, master_person_id: masterPersonId });
-          if (!emailJobsMap.has(em)) emailJobsMap.set(em, new Set());
-          if (curJobKey) emailJobsMap.get(em)!.add(curJobKey);
+          histEmailToApp.set(em, { id: a.id, master_person_id: masterPersonId, full_name: a.fullName });
+          if (!histEmailSlots.has(em)) histEmailSlots.set(em, new Set());
+          if (sId) histEmailSlots.get(em)!.add(sId);
+          if (curRole) histEmailSlots.get(em)!.add(curRole);
         }
         if (li && li.length >= 3) {
-          linkedinMap.set(li, { id: a.id, master_person_id: masterPersonId });
-          if (!linkedinJobsMap.has(li)) linkedinJobsMap.set(li, new Set());
-          if (curJobKey) linkedinJobsMap.get(li)!.add(curJobKey);
+          histLiToApp.set(li, { id: a.id, master_person_id: masterPersonId, full_name: a.fullName });
+          if (!histLiSlots.has(li)) histLiSlots.set(li, new Set());
+          if (sId) histLiSlots.get(li)!.add(sId);
+          if (curRole) histLiSlots.get(li)!.add(curRole);
         }
         if (nm && ph.length >= 7) {
-          const npKey = `${nm}|${ph}`;
-          namePhoneMap.set(npKey, { id: a.id, master_person_id: masterPersonId });
-          if (!namePhoneJobsMap.has(npKey)) namePhoneJobsMap.set(npKey, new Set());
-          if (curJobKey) namePhoneJobsMap.get(npKey)!.add(curJobKey);
+          const npKey = `${ph}:::${nm}`;
+          histPhoneNameToApp.set(npKey, { id: a.id, master_person_id: masterPersonId, full_name: a.fullName });
+          if (!histPhoneNameSlots.has(npKey)) histPhoneNameSlots.set(npKey, new Set());
+          if (sId) histPhoneNameSlots.get(npKey)!.add(sId);
+          if (curRole) histPhoneNameSlots.get(npKey)!.add(curRole);
         }
       }
 
@@ -1219,8 +1675,23 @@ export class DatabaseService {
     }
 
     if (params.status && params.status !== 'ALL') {
-      conditions.push('effective_result = ?');
-      values.push(params.status);
+      if (params.status === 'ALL_PASSED' || params.status === 'PASS_ALL') {
+        conditions.push("effective_result = 'PASS'");
+      } else if (params.status === 'PASS' || params.status === 'UNIQUE_PASSED') {
+        conditions.push("effective_result = 'PASS'");
+        conditions.push("(is_duplicate = 0 OR is_duplicate IS NULL)");
+      } else if (params.status === 'FAIL') {
+        conditions.push("effective_result = 'FAIL'");
+        conditions.push("(is_duplicate = 0 OR is_duplicate IS NULL)");
+      } else if (params.status === 'MANUAL_REVIEW') {
+        conditions.push("(effective_result = 'MANUAL_REVIEW' OR effective_result = 'ERROR')");
+        conditions.push("(is_duplicate = 0 OR is_duplicate IS NULL)");
+      } else if (params.status === 'DUPLICATE' || params.status === 'DUPLICATE_APPLICATION') {
+        conditions.push("is_duplicate = 1");
+      } else {
+        conditions.push("effective_result = ?");
+        values.push(params.status);
+      }
     }
 
     if (params.gender && params.gender !== 'ALL') {
@@ -1269,6 +1740,11 @@ export class DatabaseService {
     if ((params as any).batchId) {
       conditions.push('(import_id = ? OR batch_id = ?)');
       values.push((params as any).batchId, (params as any).batchId);
+    } else if ((params as any).viewMode === 'working_batch') {
+      // In active daily workspace without a specific batch selected, only show active working batches
+      const comp = params.company || 'AaraTech';
+      conditions.push("(import_id IS NULL OR import_id = '' OR import_id IN (SELECT id FROM imports WHERE active_working_batch = 1 AND company = ?))");
+      values.push(comp);
     }
 
     // Strict Portal Ingestion Date filter
@@ -1456,8 +1932,8 @@ export class DatabaseService {
       newStatus === 'PASS'
         ? 'Manually added to PASS'
         : newStatus === 'MANUAL_REVIEW'
-        ? 'Removed from PASS — moved to Manual Review'
-        : `Status changed to ${newStatus}`
+          ? 'Removed from PASS — moved to Manual Review'
+          : `Status changed to ${newStatus}`
     );
 
     const updateStmt = this.db.prepare(`
@@ -1505,8 +1981,8 @@ export class DatabaseService {
       newStatus === 'PASS'
         ? 'Bulk added to PASS'
         : newStatus === 'MANUAL_REVIEW'
-        ? 'Bulk removed from PASS — moved to Manual Review'
-        : `Bulk status change to ${newStatus}`
+          ? 'Bulk removed from PASS — moved to Manual Review'
+          : `Bulk status change to ${newStatus}`
     );
 
     // Identify affected import IDs before update
@@ -1632,44 +2108,50 @@ export class DatabaseService {
     `);
     const totalFiles = (totalFilesStmt.get(company) as { count: number }).count;
 
-    const totalApplicantsStmt = this.db.prepare('SELECT COUNT(*) as count FROM applicants WHERE company = ?');
-    const totalApplicants = (totalApplicantsStmt.get(company) as { count: number }).count;
+    const agg = (this.db.prepare(`
+      SELECT
+        COUNT(*) as totalApplicants,
+        SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as passedCount,
+        SUM(CASE WHEN effective_result = 'FAIL' THEN 1 ELSE 0 END) as failedCount,
+        SUM(CASE WHEN effective_result = 'MANUAL_REVIEW' THEN 1 ELSE 0 END) as manualReviewCount,
+        SUM(CASE WHEN effective_result = 'ERROR' THEN 1 ELSE 0 END) as errorCount,
+        SUM(CASE WHEN green_card_answer = 'YES' THEN 1 ELSE 0 END) as gcYes,
+        SUM(CASE WHEN green_card_answer = 'NO' THEN 1 ELSE 0 END) as gcNo,
+        SUM(CASE WHEN green_card_answer IN ('MISSING', 'UNCLEAR') THEN 1 ELSE 0 END) as gcMissing,
+        SUM(CASE WHEN sponsorship_answer = 'NO' THEN 1 ELSE 0 END) as spNo,
+        SUM(CASE WHEN sponsorship_answer = 'YES' THEN 1 ELSE 0 END) as spYes,
+        SUM(CASE WHEN sponsorship_answer IN ('MISSING', 'UNCLEAR') THEN 1 ELSE 0 END) as spMissing,
+        SUM(CASE WHEN gender = 'MALE' THEN 1 ELSE 0 END) as maleCount,
+        SUM(CASE WHEN gender = 'FEMALE' THEN 1 ELSE 0 END) as femaleCount,
+        SUM(CASE WHEN gender NOT IN ('MALE', 'FEMALE') OR gender IS NULL THEN 1 ELSE 0 END) as unspecifiedGenderCount,
+        SUM(CASE WHEN origin_region = 'SOUTH_ASIAN' THEN 1 ELSE 0 END) as southAsianCount,
+        SUM(CASE WHEN origin_region != 'SOUTH_ASIAN' OR origin_region IS NULL THEN 1 ELSE 0 END) as otherOriginCount,
+        SUM(CASE WHEN effective_result = 'PASS' OR review_decision = 'APPROVED' THEN 1 ELSE 0 END) as approvedLeadsCount,
+        SUM(CASE WHEN is_duplicate = 1 THEN 1 ELSE 0 END) as duplicateCount,
+        SUM(CASE WHEN assigned_recruiter IS NOT NULL AND assigned_recruiter != '' THEN 1 ELSE 0 END) as distributedCount
+      FROM applicants
+      WHERE company = ?
+    `).get(company) as any) || {};
 
-    const passedStmt = this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND effective_result = 'PASS'");
-    const passedCount = (passedStmt.get(company) as { count: number }).count;
-
-    const failedStmt = this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND effective_result = 'FAIL'");
-    const failedCount = (failedStmt.get(company) as { count: number }).count;
-
-    const manualReviewStmt = this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND effective_result = 'MANUAL_REVIEW'");
-    const manualReviewCount = (manualReviewStmt.get(company) as { count: number }).count;
-
-    const errorStmt = this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND effective_result = 'ERROR'");
-    const errorCount = (errorStmt.get(company) as { count: number }).count;
-
-    // Green Card Counts
-    const gcYes = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND green_card_answer = 'YES'").get(company) as { count: number }).count;
-    const gcNo = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND green_card_answer = 'NO'").get(company) as { count: number }).count;
-    const gcMissing = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND green_card_answer IN ('MISSING', 'UNCLEAR')").get(company) as { count: number }).count;
-
-    // Sponsorship Counts
-    const spNo = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND sponsorship_answer = 'NO'").get(company) as { count: number }).count;
-    const spYes = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND sponsorship_answer = 'YES'").get(company) as { count: number }).count;
-    const spMissing = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND sponsorship_answer IN ('MISSING', 'UNCLEAR')").get(company) as { count: number }).count;
-
-    // Gender Counts
-    const maleCount = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND gender = 'MALE'").get(company) as { count: number }).count;
-    const femaleCount = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND gender = 'FEMALE'").get(company) as { count: number }).count;
-    const unspecifiedGenderCount = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND gender NOT IN ('MALE', 'FEMALE')").get(company) as { count: number }).count;
-
-    // Origin Counts
-    const southAsianCount = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND origin_region = 'SOUTH_ASIAN'").get(company) as { count: number }).count;
-    const otherOriginCount = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND origin_region != 'SOUTH_ASIAN'").get(company) as { count: number }).count;
-
-    // Approved Leads, Duplicates, Distributed Leads
-    const approvedLeadsCount = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND (effective_result = 'PASS' OR review_decision = 'APPROVED')").get(company) as { count: number }).count;
-    const duplicateCount = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND is_duplicate = 1").get(company) as { count: number }).count;
-    const distributedCount = (this.db.prepare("SELECT COUNT(*) as count FROM applicants WHERE company = ? AND assigned_recruiter IS NOT NULL AND assigned_recruiter != ''").get(company) as { count: number }).count;
+    const totalApplicants = Number(agg.totalApplicants || 0);
+    const passedCount = Number(agg.passedCount || 0);
+    const failedCount = Number(agg.failedCount || 0);
+    const manualReviewCount = Number(agg.manualReviewCount || 0);
+    const errorCount = Number(agg.errorCount || 0);
+    const gcYes = Number(agg.gcYes || 0);
+    const gcNo = Number(agg.gcNo || 0);
+    const gcMissing = Number(agg.gcMissing || 0);
+    const spNo = Number(agg.spNo || 0);
+    const spYes = Number(agg.spYes || 0);
+    const spMissing = Number(agg.spMissing || 0);
+    const maleCount = Number(agg.maleCount || 0);
+    const femaleCount = Number(agg.femaleCount || 0);
+    const unspecifiedGenderCount = Number(agg.unspecifiedGenderCount || 0);
+    const southAsianCount = Number(agg.southAsianCount || 0);
+    const otherOriginCount = Number(agg.otherOriginCount || 0);
+    const approvedLeadsCount = Number(agg.approvedLeadsCount || 0);
+    const duplicateCount = Number(agg.duplicateCount || 0);
+    const distributedCount = Number(agg.distributedCount || 0);
 
     // Top Jobs for Company
     const topJobsStmt = this.db.prepare(`
@@ -1720,15 +2202,18 @@ export class DatabaseService {
   }
 
   // --- Imports Query (Company Scoped) ---
-  getImports(limit = 50, company?: string): ImportRecord[] {
+  getImports(limit: number | string = 50, company?: string): ImportRecord[] {
+    const finalLimit = typeof limit === 'number' ? limit : (parseInt(String(limit), 10) || 50);
+    const finalCompany = typeof limit === 'string' && isNaN(Number(limit)) ? limit : company;
+
     let importsStmt;
     let importRows: any[];
-    if (company) {
+    if (finalCompany) {
       importsStmt = this.db.prepare('SELECT * FROM imports WHERE company = ? ORDER BY uploaded_at DESC LIMIT ?');
-      importRows = importsStmt.all(company, limit) as any[];
+      importRows = importsStmt.all(finalCompany, finalLimit) as any[];
     } else {
       importsStmt = this.db.prepare('SELECT * FROM imports ORDER BY uploaded_at DESC LIMIT ?');
-      importRows = importsStmt.all(limit) as any[];
+      importRows = importsStmt.all(finalLimit) as any[];
     }
 
     return importRows.map(imp => {
@@ -1739,7 +2224,7 @@ export class DatabaseService {
       let parsedJobSlots: string[] = [];
       try {
         if (imp.job_slots) parsedJobSlots = JSON.parse(imp.job_slots);
-      } catch {}
+      } catch { }
 
       return {
         id: imp.id,
@@ -1947,7 +2432,10 @@ export class DatabaseService {
   clearWorkingBatch(batchId: string, company: 'AaraTech' | 'ClinisolTech', purgeRecords = false): {
     success: boolean;
     batchId: string;
+    company: string;
     clearedMode: 'purged' | 'unloaded';
+    activeWorkingBatchCleared: boolean;
+    purgedApplicants: number;
     applicantsDeleted: number;
     message: string;
   } {
@@ -1959,28 +2447,243 @@ export class DatabaseService {
     const countRow = this.db.prepare('SELECT COUNT(*) as c FROM applicants WHERE import_id = ? AND company = ?').get(batchId, company) as any;
     const applicantCount = countRow?.c || 0;
 
-    // Always safely unload active batch from working view without deleting permanent application records
-    this.db.prepare('UPDATE imports SET active_working_batch = 0 WHERE id = ? AND company = ?').run(batchId, company);
+    let purgedApplicants = 0;
+    if (purgeRecords) {
+      this.db.prepare('DELETE FROM applicants WHERE (import_id = ? OR batch_id = ?) AND company = ?').run(batchId, batchId, company);
+      this.db.prepare('DELETE FROM import_files WHERE import_id = ?').run(batchId);
+      this.db.prepare('DELETE FROM imports WHERE id = ? AND company = ?').run(batchId, company);
+      purgedApplicants = applicantCount;
+    } else {
+      // Safely unload active batch from working view without deleting permanent application records
+      this.db.prepare('UPDATE imports SET active_working_batch = 0 WHERE id = ? AND company = ?').run(batchId, company);
+    }
 
     this.addAuditLog({
       id: `audit-${Date.now()}`,
       timestamp: new Date().toISOString(),
       user: 'Recruiter Admin',
-      action: 'Batch Unloaded',
-      reason: `User safely cleared active batch ${batch.import_code} (${batch.batch_name || 'Import Batch'}) from ${company} working view.`,
-      details: `Working view cleared. All ${applicantCount} applicant records, screening decisions, and master links remain permanently preserved in application history and reporting.`,
+      action: purgeRecords ? 'Batch Purged' : 'Batch Unloaded',
+      reason: `User cleared active batch ${batch.import_code} (${batch.batch_name || 'Import Batch'}) from ${company} workspace (mode: ${purgeRecords ? 'purged' : 'unloaded'}).`,
+      details: purgeRecords
+        ? `Batch ${batch.import_code} and all ${applicantCount} applicant rows purged from screening workspace. Master candidate CRM records remain permanently intact.`
+        : `Working view cleared. All ${applicantCount} applicant records, screening decisions, and master links remain permanently preserved in application history and reporting.`,
     });
 
     return {
       success: true,
       batchId,
       company,
-      clearedMode: 'unloaded',
+      clearedMode: purgeRecords ? 'purged' : 'unloaded',
+      activeWorkingBatchCleared: true,
+      purgedApplicants,
+      applicantsDeleted: purgedApplicants,
+      message: purgeRecords
+        ? `Batch ${batch.import_code} and its ${applicantCount} applicant records purged from ${company} filter workspace. Master CRM records remain preserved.`
+        : `Batch ${batch.import_code} cleared from active working view. All ${applicantCount} applicants safely preserved in permanent history.`,
+    };
+  }
+
+  // --- Clear All Working Batches / All Slots at a time ---
+  clearAllWorkingBatches(company: 'AaraTech' | 'ClinisolTech', purgeRecords = false, user = 'Recruiter Admin') {
+    if (purgeRecords) {
+      return this.clearAllApplications(company, user);
+    }
+
+    const totalBatches = this.db.prepare('SELECT COUNT(*) as c FROM imports WHERE company = ?').get(company) as any;
+    const totalApps = this.db.prepare('SELECT COUNT(*) as c FROM applicants WHERE company = ?').get(company) as any;
+
+    this.db.prepare('UPDATE imports SET active_working_batch = 0 WHERE company = ?').run(company);
+
+    this.addAuditLog({
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      user,
+      action: 'All Batches Unloaded',
+      reason: `User safely cleared all active slots/batches from ${company} working view.`,
+      details: `All ${totalBatches?.c || 0} batches cleared from working view. All ${totalApps?.c || 0} applicants remain permanently preserved in application history and reporting.`,
+    });
+
+    return {
+      success: true,
+      company,
+      clearedMode: 'unloaded' as const,
       activeWorkingBatchCleared: true,
       purgedApplicants: 0,
       applicantsDeleted: 0,
-      message: `Batch ${batch.import_code} cleared from active working view. All ${applicantCount} applicants safely preserved in permanent history.`,
+      totalBatches: totalBatches?.c || 0,
+      totalApplicants: totalApps?.c || 0,
+      message: `All ${totalBatches?.c || 0} slots/batches cleared from active working view for ${company}. All ${totalApps?.c || 0} applicants safely preserved in permanent history.`,
     };
+  }
+
+  // --- Clear Daily Batches for a specific date (or today) ---
+  clearDailyBatches(
+    company: 'AaraTech' | 'ClinisolTech',
+    applicationDate?: string,
+    purgeRecords = false,
+    user = 'Recruiter Admin'
+  ): {
+    success: boolean;
+    company: string;
+    clearedMode: 'purged' | 'unloaded';
+    activeWorkingBatchCleared: boolean;
+    purgedApplicants: number;
+    applicantsDeleted: number;
+    totalBatches: number;
+    totalApplicants: number;
+    message: string;
+  } {
+    let importRows: any[];
+
+    if (applicationDate && applicationDate !== 'ALL') {
+      importRows = this.db.prepare('SELECT id, import_code, total_applicants FROM imports WHERE company = ? AND application_date = ?').all(company, applicationDate) as any[];
+    } else {
+      // In active workspace without specific date, only target active working batches!
+      importRows = this.db.prepare('SELECT id, import_code, total_applicants FROM imports WHERE company = ? AND active_working_batch = 1').all(company) as any[];
+    }
+
+    const totalBatches = importRows.length;
+    if (totalBatches === 0) {
+      return {
+        success: true,
+        company,
+        clearedMode: purgeRecords ? 'purged' : 'unloaded',
+        activeWorkingBatchCleared: true,
+        purgedApplicants: 0,
+        applicantsDeleted: 0,
+        totalBatches: 0,
+        totalApplicants: 0,
+        message: `No active daily batches found to clear for ${company}.`,
+      };
+    }
+
+    const batchIds = importRows.map(r => r.id);
+    const placeholders = batchIds.map(() => '?').join(',');
+
+    const countRow = this.db.prepare(`SELECT COUNT(*) as c FROM applicants WHERE company = ? AND import_id IN (${placeholders})`).get(company, ...batchIds) as any;
+    const totalApps = countRow?.c || 0;
+    let purgedApplicants = 0;
+
+    if (purgeRecords) {
+      // Strictly scoped deletion to ONLY the batches uploaded on this day - NEVER company-wide delete!
+      this.db.prepare(`DELETE FROM applicants WHERE company = ? AND import_id IN (${placeholders})`).run(company, ...batchIds);
+      this.db.prepare(`DELETE FROM import_files WHERE import_id IN (${placeholders})`).run(...batchIds);
+      this.db.prepare(`DELETE FROM imports WHERE company = ? AND id IN (${placeholders})`).run(company, ...batchIds);
+      purgedApplicants = totalApps;
+    } else {
+      // Safely unload from active daily view without deleting any applicant or CRM rows
+      this.db.prepare(`UPDATE imports SET active_working_batch = 0 WHERE company = ? AND id IN (${placeholders})`).run(company, ...batchIds);
+    }
+
+    const dateLabel = applicationDate && applicationDate !== 'ALL' ? `for ${applicationDate}` : 'active daily';
+    this.addAuditLog({
+      id: `audit-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      user,
+      action: purgeRecords ? 'Daily Batches Purged' : 'Daily Batches Unloaded',
+      reason: `User cleared ${dateLabel} batches from ${company} workspace (mode: ${purgeRecords ? 'purged' : 'unloaded'}).`,
+      details: purgeRecords
+        ? `All ${totalBatches} batches and ${totalApps} applicant records ${dateLabel} purged. Master candidate CRM records remain permanently preserved.`
+        : `All ${totalBatches} batches ${dateLabel} unloaded from active working view. All ${totalApps} applicants preserved in permanent history.`,
+    });
+
+    return {
+      success: true,
+      company,
+      clearedMode: purgeRecords ? 'purged' : 'unloaded',
+      activeWorkingBatchCleared: true,
+      purgedApplicants,
+      applicantsDeleted: purgedApplicants,
+      totalBatches,
+      totalApplicants: totalApps,
+      message: purgeRecords
+        ? `Cleared and purged all ${totalBatches} uploads (${totalApps} applicants) ${dateLabel} for ${company}. Master CRM records remain permanently preserved.`
+        : `Unloaded all ${totalBatches} uploads (${totalApps} applicants) ${dateLabel} from active working view for ${company}. Applications remain safely preserved in permanent history.`,
+    };
+  }
+
+  // --- Auto-Rotate Daily Batches based on EST Date (America/New_York) ---
+  autoRotateDailyBatchesEST(): { rotatedBatches: number; todayEST: string } {
+    try {
+      const todayEST = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+      // Fast read-only check first so GET endpoints don't acquire unnecessary SQLite write locks
+      const needsRotation = this.db.prepare(`
+        SELECT 1 FROM imports
+        WHERE active_working_batch = 1
+          AND (
+            application_date < ?
+            OR (application_date IS NULL AND substr(uploaded_at, 1, 10) < ?)
+          )
+        LIMIT 1
+      `).get(todayEST, todayEST);
+      if (!needsRotation) {
+        return { rotatedBatches: 0, todayEST };
+      }
+      const stmt = this.db.prepare(`
+        UPDATE imports 
+        SET active_working_batch = 0 
+        WHERE active_working_batch = 1 
+          AND (
+            application_date < ? 
+            OR (application_date IS NULL AND substr(uploaded_at, 1, 10) < ?)
+          )
+      `);
+      const info = stmt.run(todayEST, todayEST);
+      return {
+        rotatedBatches: Number(info.changes),
+        todayEST,
+      };
+    } catch (err: any) {
+      console.warn('Auto-rotate daily batches EST error:', err?.message || err);
+      return { rotatedBatches: 0, todayEST: new Date().toISOString().split('T')[0] };
+    }
+  }
+
+  // --- Authoritative Database Health Check ---
+  checkDatabaseHealth(company: 'AaraTech' | 'ClinisolTech') {
+    const startTime = performance.now();
+    try {
+      const appRow = this.db.prepare('SELECT COUNT(*) as c FROM applicants WHERE company = ?').get(company) as any;
+      const peopleRow = this.db.prepare('SELECT COUNT(*) as c FROM master_people WHERE company = ?').get(company) as any;
+      const masterAppsRow = this.db.prepare('SELECT COUNT(*) as c FROM master_applications WHERE company = ?').get(company) as any;
+      const importsRow = this.db.prepare('SELECT COUNT(*) as c FROM imports WHERE company = ?').get(company) as any;
+      const latestAudit = this.db.prepare('SELECT timestamp FROM audit_logs ORDER BY timestamp DESC LIMIT 1').get() as any;
+
+      const latencyMs = Math.round(performance.now() - startTime);
+      const now = new Date().toISOString();
+
+      return {
+        status: 'ONLINE' as const,
+        company,
+        connected: true,
+        dbType: 'SQLite Relational Database (Authoritative)',
+        latencyMs,
+        applicantCount: appRow?.c || 0,
+        masterPeopleCount: peopleRow?.c || 0,
+        masterAppCount: masterAppsRow?.c || 0,
+        importCount: importsRow?.c || 0,
+        lastSuccessfulCheck: now,
+        lastSuccessfulRead: now,
+        lastSuccessfulWrite: latestAudit?.timestamp || now,
+        syncStatus: 'Authoritative Production Store Verified',
+      };
+    } catch (err: any) {
+      return {
+        status: 'OFFLINE' as const,
+        company,
+        connected: false,
+        dbType: 'SQLite Relational Database (Authoritative)',
+        latencyMs: Math.round(performance.now() - startTime),
+        applicantCount: 0,
+        masterPeopleCount: 0,
+        masterAppCount: 0,
+        importCount: 0,
+        lastSuccessfulCheck: new Date().toISOString(),
+        lastSuccessfulRead: '',
+        lastSuccessfulWrite: '',
+        syncStatus: `Database query error: ${err.message}`,
+      };
+    }
   }
 
   // --- Clear All Applications for Company Workspace (Fresh Start) ---
@@ -1990,10 +2693,10 @@ export class DatabaseService {
     const failedRow = this.db.prepare("SELECT COUNT(*) as c FROM applicants WHERE company = ? AND (effective_result = 'FAIL' OR (effective_result IS NULL AND automated_result = 'FAIL'))").get(company) as any;
     const reviewRow = this.db.prepare("SELECT COUNT(*) as c FROM applicants WHERE company = ? AND (effective_result = 'MANUAL_REVIEW' OR (effective_result IS NULL AND automated_result = 'MANUAL_REVIEW'))").get(company) as any;
     const dupRow = this.db.prepare('SELECT COUNT(*) as c FROM applicants WHERE company = ? AND is_duplicate = 1').get(company) as any;
-    
+
     const totalBatchesRow = this.db.prepare('SELECT COUNT(*) as c FROM imports WHERE company = ?').get(company) as any;
     const workingBatchesRow = this.db.prepare('SELECT COUNT(*) as c FROM imports WHERE company = ? AND active_working_batch = 1').get(company) as any;
-    
+
     const masterCandidatesRow = this.db.prepare('SELECT COUNT(*) as c FROM master_people WHERE company = ?').get(company) as any;
     const jobsRow = this.db.prepare('SELECT COUNT(*) as c FROM jobs WHERE company = ?').get(company) as any;
 
@@ -2032,7 +2735,7 @@ export class DatabaseService {
 
       this.db.exec('COMMIT');
     } catch (err) {
-      try { this.db.exec('ROLLBACK'); } catch {}
+      try { this.db.exec('ROLLBACK'); } catch { }
       throw err;
     }
 
@@ -2192,13 +2895,24 @@ export class DatabaseService {
     `;
     const overview = (this.db.prepare(overviewQuery).get(...dateParams) as any) || {};
 
-    const total = overview.total || 0;
-    const passed = overview.passed || 0;
-    const failed = overview.failed || 0;
-    const manualReview = overview.manualReview || 0;
-    const approved = overview.approved || 0;
-    const duplicates = overview.duplicates || 0;
-    const distributed = overview.distributed || 0;
+    let total = overview.total || 0;
+    let passed = overview.passed || 0;
+    let failed = overview.failed || 0;
+    let manualReview = overview.manualReview || 0;
+    let approved = overview.approved || 0;
+    let duplicates = overview.duplicates || 0;
+    let distributed = overview.distributed || 0;
+
+    // Monthly fallback to master_applications if applicants table has 0 records for historical month
+    const monthPrefix = targetDate.length >= 7 ? targetDate.slice(0, 7) : targetDate;
+    if (period === 'monthly' && total === 0) {
+      const mStats = this.getMonthSummary(company, monthPrefix);
+      total = mStats.total;
+      passed = mStats.passed;
+      failed = mStats.failed;
+      duplicates = mStats.duplicates;
+    }
+
     const passRate = total > 0 ? Math.round((passed / total) * 100) : 0;
 
     // Unique Candidates in reporting period
@@ -2207,24 +2921,13 @@ export class DatabaseService {
       FROM applicants
       WHERE company = ? ${dateFilter}
     `).get(...dateParams) as any) || {};
-    const uniqueCandidatesCount = uniqueCandRow.count || 0;
+    let uniqueCandidatesCount = uniqueCandRow.count || 0;
+    if (period === 'monthly' && uniqueCandidatesCount === 0 && total > 0) {
+      uniqueCandidatesCount = total;
+    }
 
-    // Repeat Applications in reporting period
-    const repeatRow = (this.db.prepare(`
-      SELECT COUNT(*) as count
-      FROM applicants a
-      WHERE a.company = ? ${dateFilter}
-        AND EXISTS (
-          SELECT 1 FROM applicants a2
-          WHERE a2.company = a.company
-            AND a2.id != a.id
-            AND (
-              (a2.email IS NOT NULL AND a2.email != '' AND a2.email = a.email) OR
-              (a2.phone IS NOT NULL AND a2.phone != '' AND a2.phone = a.phone)
-            )
-        )
-    `).get(...dateParams) as any) || {};
-    const repeatApplicationsCount = repeatRow.count || 0;
+    // Repeat Applications in reporting period (instant indexed aggregation)
+    const repeatApplicationsCount = overview.duplicates || Math.max(0, total - uniqueCandidatesCount);
 
     // Transferred applications to Master DB during this period
     let transferDateFilter = '';
@@ -2441,11 +3144,51 @@ export class DatabaseService {
     }
 
     let comparison: any = null;
-    if (prevDateFilter) {
+    if (period === 'monthly') {
+      const monthPrefix = targetDate.length >= 7 ? targetDate.slice(0, 7) : targetDate;
+      const [yStr, mStr] = monthPrefix.split('-');
+      let prevY = parseInt(yStr, 10);
+      let prevM = parseInt(mStr, 10) - 1;
+      if (prevM < 1) { prevM = 12; prevY -= 1; }
+      const prevMonthKey = `${prevY}-${String(prevM).padStart(2, '0')}`;
+      const prevSummary = this.getMonthSummary(company, prevMonthKey);
+
+      const prevTotal = prevSummary.total;
+      const prevPassed = prevSummary.passed;
+      const prevDuplicates = prevSummary.duplicates;
+      const prevFailed = prevSummary.failed;
+      const prevPassRate = prevSummary.passRate;
+      const hasPreviousData = prevTotal > 0;
+
+      comparison = {
+        hasPreviousData,
+        previousPeriodLabel: prevSummary.label,
+        previousTotal: prevTotal,
+        previousPassed: prevPassed,
+        previousDuplicates: prevDuplicates,
+        previousFailed: prevFailed,
+        previousPassRate: prevPassRate,
+        previousTransferred: 0,
+        deltas: {
+          total: total - prevTotal,
+          totalPct: hasPreviousData ? Math.round(((total - prevTotal) / prevTotal) * 100) : 0,
+          passed: passed - prevPassed,
+          passedPct: prevPassed > 0 ? Math.round(((passed - prevPassed) / prevPassed) * 100) : 0,
+          duplicates: duplicates - prevDuplicates,
+          duplicatesPct: prevDuplicates > 0 ? Math.round(((duplicates - prevDuplicates) / prevDuplicates) * 100) : 0,
+          failed: failed - prevFailed,
+          failedPct: prevFailed > 0 ? Math.round(((failed - prevFailed) / prevFailed) * 100) : 0,
+          passRate: passRate - prevPassRate,
+          transferred: 0,
+        },
+      };
+    } else if (prevDateFilter) {
       const prevRow = (this.db.prepare(`
         SELECT
           COUNT(*) as total,
           SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as passed,
+          SUM(CASE WHEN is_duplicate = 1 THEN 1 ELSE 0 END) as duplicates,
+          SUM(CASE WHEN effective_result = 'FAIL' THEN 1 ELSE 0 END) as failed,
           SUM(CASE WHEN review_decision = 'APPROVED' OR effective_result = 'PASS' THEN 1 ELSE 0 END) as approved,
           SUM(CASE WHEN master_person_id IS NOT NULL AND master_person_id != '' AND (review_decision = 'APPROVED' OR effective_result = 'PASS') THEN 1 ELSE 0 END) as transferred
         FROM applicants
@@ -2454,17 +3197,29 @@ export class DatabaseService {
 
       const prevTotal = prevRow.total || 0;
       const prevPassed = prevRow.passed || 0;
+      const prevDuplicates = prevRow.duplicates || 0;
+      const prevFailed = prevRow.failed || 0;
       const prevTransferred = prevRow.transferred || 0;
       const prevPassRate = prevTotal > 0 ? Math.round((prevPassed / prevTotal) * 100) : 0;
+      const hasPreviousData = prevTotal > 0;
 
       comparison = {
+        hasPreviousData,
         previousTotal: prevTotal,
         previousPassed: prevPassed,
+        previousDuplicates: prevDuplicates,
+        previousFailed: prevFailed,
         previousPassRate: prevPassRate,
         previousTransferred: prevTransferred,
         deltas: {
           total: total - prevTotal,
+          totalPct: hasPreviousData ? Math.round(((total - prevTotal) / prevTotal) * 100) : 0,
           passed: passed - prevPassed,
+          passedPct: prevPassed > 0 ? Math.round(((passed - prevPassed) / prevPassed) * 100) : 0,
+          duplicates: duplicates - prevDuplicates,
+          duplicatesPct: prevDuplicates > 0 ? Math.round(((duplicates - prevDuplicates) / prevDuplicates) * 100) : 0,
+          failed: failed - prevFailed,
+          failedPct: prevFailed > 0 ? Math.round(((failed - prevFailed) / prevFailed) * 100) : 0,
           passRate: passRate - prevPassRate,
           transferred: transferredCount - prevTransferred,
         },
@@ -2472,19 +3227,363 @@ export class DatabaseService {
     }
 
     // Daily Trend
-    const trendRows = this.db.prepare(`
+    let trendRows = this.db.prepare(`
       SELECT
         COALESCE(NULLIF(application_date, ''), strftime('%Y-%m-%d', created_at)) as date,
         COUNT(*) as total,
         SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as passed,
         SUM(CASE WHEN effective_result = 'FAIL' THEN 1 ELSE 0 END) as failed,
-        SUM(CASE WHEN effective_result = 'MANUAL_REVIEW' THEN 1 ELSE 0 END) as manualReview
+        SUM(CASE WHEN effective_result = 'MANUAL_REVIEW' THEN 1 ELSE 0 END) as manualReview,
+        SUM(CASE WHEN is_duplicate = 1 THEN 1 ELSE 0 END) as duplicates
       FROM applicants
       WHERE company = ? AND (application_date IS NOT NULL OR created_at IS NOT NULL)
       GROUP BY date
-      ORDER BY date DESC
-      LIMIT 14
+      ORDER BY date ASC
     `).all(company) as any[];
+
+    if (period === 'monthly' && (overview.total || 0) === 0 && total > 0) {
+      trendRows = (this.db.prepare(`
+        SELECT
+          COALESCE(ma.application_collected_date, ma.date_applied) as date,
+          COUNT(*) as total,
+          SUM(CASE WHEN ma.effective_result = 'PASS' THEN 1 ELSE 0 END) as passed,
+          SUM(CASE WHEN ma.effective_result = 'FAIL' THEN 1 ELSE 0 END) as failed,
+          0 as manualReview,
+          0 as duplicates
+        FROM master_applications ma
+        WHERE ma.company = ? AND (ma.application_collected_date LIKE ? OR ma.date_applied LIKE ?)
+        GROUP BY date
+        ORDER BY date ASC
+      `).all(company, `${monthPrefix}%`, `${monthPrefix}%`) as any[]) || [];
+    }
+
+    // Unique Passed Candidates for Scope
+    const uniquePassedRow = (this.db.prepare(`
+      SELECT COUNT(DISTINCT COALESCE(NULLIF(email, ''), NULLIF(phone, ''), full_name)) as count
+      FROM applicants
+      WHERE company = ? AND effective_result = 'PASS' ${dateFilter}
+    `).get(...dateParams) as any) || {};
+    let uniquePassedCandidates = uniquePassedRow.count || 0;
+    if (period === 'monthly' && (overview.total || 0) === 0 && total > 0) {
+      uniquePassedCandidates = passed;
+    }
+
+    // Demographics for Passed Candidates
+    let passedDemographicsRows = (this.db.prepare(`
+      SELECT 
+        UPPER(COALESCE(mp.gender, a.gender, 'UNSPECIFIED')) as gender,
+        COUNT(DISTINCT COALESCE(NULLIF(a.email, ''), NULLIF(a.phone, ''), a.full_name)) as count
+      FROM applicants a
+      LEFT JOIN master_people mp ON a.master_person_id = mp.id OR a.master_person_id = mp.person_id
+      WHERE a.company = ? AND a.effective_result = 'PASS' ${dateFilter}
+      GROUP BY UPPER(COALESCE(mp.gender, a.gender, 'UNSPECIFIED'))
+    `).all(...dateParams) as any[]) || [];
+
+    if (period === 'monthly' && (overview.total || 0) === 0 && total > 0) {
+      passedDemographicsRows = (this.db.prepare(`
+        SELECT 
+          UPPER(COALESCE(mp.gender, 'UNSPECIFIED')) as gender,
+          COUNT(DISTINCT mp.id) as count
+        FROM master_applications ma
+        LEFT JOIN master_people mp ON ma.person_id = mp.id
+        WHERE ma.company = ? AND ma.effective_result = 'PASS' AND (ma.application_collected_date LIKE ? OR ma.date_applied LIKE ?)
+        GROUP BY UPPER(COALESCE(mp.gender, 'UNSPECIFIED'))
+      `).all(company, `${monthPrefix}%`, `${monthPrefix}%`) as any[]) || [];
+    }
+
+    let malePassedCount = 0;
+    let femalePassedCount = 0;
+    let unspecifiedPassedCount = 0;
+    for (const r of passedDemographicsRows) {
+      const g = (r.gender || '').toUpperCase();
+      if (g.startsWith('M')) malePassedCount += r.count;
+      else if (g.startsWith('F')) femalePassedCount += r.count;
+      else unspecifiedPassedCount += r.count;
+    }
+    const totalVerifiedGender = malePassedCount + femalePassedCount;
+    const malePercentage = totalVerifiedGender > 0 ? Math.round((malePassedCount / totalVerifiedGender) * 100) : 0;
+    const femalePercentage = totalVerifiedGender > 0 ? Math.round((femalePassedCount / totalVerifiedGender) * 100) : 0;
+    const demographics = {
+      male: { count: malePassedCount, percentage: malePercentage },
+      female: { count: femalePassedCount, percentage: femalePercentage },
+      unspecified: { count: unspecifiedPassedCount, percentage: uniquePassedCandidates > 0 ? Math.round((unspecifiedPassedCount / uniquePassedCandidates) * 100) : 0 },
+      totalVerified: totalVerifiedGender,
+      ageGroups: [
+        { group: '18–25', count: 0, percentage: 0 },
+        { group: '26–35', count: 0, percentage: 0 },
+        { group: '36–45', count: 0, percentage: 0 },
+        { group: '46+', count: 0, percentage: 0 },
+      ],
+      ageNote: 'Verified Date of Birth not captured in standard ATS import feeds per EEOC compliance guidelines.',
+    };
+
+    // Geographic Distribution of Passed Candidates (Canonicalized)
+    let geoRows = (this.db.prepare(`
+      SELECT a.location, COUNT(DISTINCT COALESCE(NULLIF(a.email, ''), NULLIF(a.phone, ''), a.full_name)) as count
+      FROM applicants a
+      WHERE a.company = ? AND a.effective_result = 'PASS' ${dateFilter}
+      GROUP BY a.location
+    `).all(...dateParams) as any[]) || [];
+
+    if (period === 'monthly' && (overview.total || 0) === 0 && total > 0) {
+      geoRows = (this.db.prepare(`
+        SELECT mp.location, COUNT(DISTINCT mp.id) as count
+        FROM master_applications ma
+        LEFT JOIN master_people mp ON ma.person_id = mp.id
+        WHERE ma.company = ? AND ma.effective_result = 'PASS' AND (ma.application_collected_date LIKE ? OR ma.date_applied LIKE ?)
+        GROUP BY mp.location
+      `).all(company, `${monthPrefix}%`, `${monthPrefix}%`) as any[]) || [];
+    }
+
+    const geoMap = new Map<string, number>();
+    for (const r of geoRows) {
+      const canon = canonicalizeLocation(r.location);
+      geoMap.set(canon, (geoMap.get(canon) || 0) + r.count);
+    }
+    const sortedGeo = Array.from(geoMap.entries()).sort((a, b) => b[1] - a[1]);
+    const top5Locations = sortedGeo.slice(0, 5).map(([name, count]) => ({
+      name,
+      count,
+      percentage: uniquePassedCandidates > 0 ? Math.round((count / uniquePassedCandidates) * 100) : 0,
+    }));
+    const otherCount = sortedGeo.slice(5).reduce((acc, [, count]) => acc + count, 0);
+    const geographicDistribution = {
+      topLocations: top5Locations,
+      other: {
+        name: 'Other Locations',
+        count: otherCount,
+        percentage: uniquePassedCandidates > 0 ? Math.round((otherCount / uniquePassedCandidates) * 100) : 0,
+      },
+      allLocations: sortedGeo.map(([name, count]) => ({
+        name,
+        count,
+        percentage: uniquePassedCandidates > 0 ? Math.round((count / uniquePassedCandidates) * 100) : 0,
+      })),
+    };
+
+    // Hierarchical Technology & Job Slot Tree
+    let techRows = (this.db.prepare(`
+      SELECT 
+        a.job_id,
+        a.job_title,
+        UPPER(COALESCE(mp.gender, a.gender, 'UNSPECIFIED')) as gender,
+        a.effective_result,
+        a.is_duplicate
+      FROM applicants a
+      LEFT JOIN master_people mp ON a.master_person_id = mp.id OR a.master_person_id = mp.person_id
+      WHERE a.company = ? ${dateFilter}
+    `).all(...dateParams) as any[]) || [];
+
+    if (period === 'monthly' && (overview.total || 0) === 0 && total > 0) {
+      techRows = (this.db.prepare(`
+        SELECT 
+          ma.job_id,
+          ma.job_title,
+          UPPER(COALESCE(mp.gender, 'UNSPECIFIED')) as gender,
+          ma.effective_result,
+          0 as is_duplicate
+        FROM master_applications ma
+        LEFT JOIN master_people mp ON ma.person_id = mp.id
+        WHERE ma.company = ? AND (ma.application_collected_date LIKE ? OR ma.date_applied LIKE ?)
+      `).all(company, `${monthPrefix}%`, `${monthPrefix}%`) as any[]) || [];
+    }
+
+    const techGroupMap = new Map<string, any>();
+    for (const r of techRows) {
+      const tech = getTechCategory(r.job_title, r.job_id);
+      const slotKey = r.job_id || r.job_title || 'Unknown Slot';
+      const slotTitle = r.job_title || r.job_id;
+
+      if (!techGroupMap.has(tech)) {
+        techGroupMap.set(tech, {
+          technology: tech,
+          totalApplied: 0,
+          passedTotal: 0,
+          passedMale: 0,
+          passedFemale: 0,
+          passedUnspecified: 0,
+          duplicates: 0,
+          failed: 0,
+          inReview: 0,
+          slots: new Map<string, any>(),
+        });
+      }
+      const t = techGroupMap.get(tech)!;
+      t.totalApplied++;
+      if (r.is_duplicate === 1) t.duplicates++;
+      if (r.effective_result === 'FAIL') t.failed++;
+      if (r.effective_result === 'MANUAL_REVIEW') t.inReview++;
+
+      if (!t.slots.has(slotKey)) {
+        t.slots.set(slotKey, {
+          jobId: r.job_id,
+          jobTitle: slotTitle,
+          totalApplied: 0,
+          passedTotal: 0,
+          passedMale: 0,
+          passedFemale: 0,
+          passedUnspecified: 0,
+          duplicates: 0,
+          failed: 0,
+          inReview: 0,
+        });
+      }
+      const s = t.slots.get(slotKey)!;
+      s.totalApplied++;
+      if (r.is_duplicate === 1) s.duplicates++;
+      if (r.effective_result === 'FAIL') s.failed++;
+      if (r.effective_result === 'MANUAL_REVIEW') s.inReview++;
+
+      if (r.effective_result === 'PASS') {
+        t.passedTotal++;
+        s.passedTotal++;
+        const g = (r.gender || '').toUpperCase();
+        if (g.startsWith('M')) {
+          t.passedMale++;
+          s.passedMale++;
+        } else if (g.startsWith('F')) {
+          t.passedFemale++;
+          s.passedFemale++;
+        } else {
+          t.passedUnspecified++;
+          s.passedUnspecified++;
+        }
+      }
+    }
+
+    const technologyTree = Array.from(techGroupMap.values()).map(t => {
+      const passRate = t.totalApplied > 0 ? Math.round((t.passedTotal / t.totalApplied) * 100) : 0;
+      const repeatRate = t.totalApplied > 0 ? Math.round((t.duplicates / t.totalApplied) * 100) : 0;
+      const slots = Array.from(t.slots.values()).map((s: any) => {
+        const sPassRate = s.totalApplied > 0 ? Math.round((s.passedTotal / s.totalApplied) * 100) : 0;
+        const sRepeatRate = s.totalApplied > 0 ? Math.round((s.duplicates / s.totalApplied) * 100) : 0;
+        return {
+          ...s,
+          passedFormatted: `${s.passedTotal} (M: ${s.passedMale} | F: ${s.passedFemale})`,
+          passRate: sPassRate,
+          repeatRate: sRepeatRate,
+        };
+      }).sort((a: any, b: any) => b.totalApplied - a.totalApplied);
+
+      return {
+        technology: t.technology,
+        totalApplied: t.totalApplied,
+        passedTotal: t.passedTotal,
+        passedMale: t.passedMale,
+        passedFemale: t.passedFemale,
+        passedUnspecified: t.passedUnspecified,
+        passedFormatted: `${t.passedTotal} (M: ${t.passedMale} | F: ${t.passedFemale})`,
+        duplicates: t.duplicates,
+        failed: t.failed,
+        inReview: t.inReview,
+        passRate,
+        repeatRate,
+        slots,
+      };
+    }).sort((a, b) => b.totalApplied - a.totalApplied);
+
+    // Recruitment Funnel
+    const funnel = {
+      applicationLevel: [
+        { stage: 'Total Ingested', count: total, percentage: 100 },
+        { stage: 'Screened & Evaluated', count: passed + failed + manualReview, percentage: total > 0 ? Math.round(((passed + failed + manualReview) / total) * 100) : 0 },
+        { stage: 'Passed Requirements', count: passed, percentage: total > 0 ? Math.round((passed / total) * 100) : 0 },
+        { stage: 'Transferred to Master DB', count: transferredCount, percentage: total > 0 ? Math.round((transferredCount / total) * 100) : 0 }
+      ],
+      personLevel: [
+        { stage: 'Unique Candidates Ingested', count: uniqueCandidatesCount, percentage: 100 },
+        { stage: 'Unique Candidates Passed', count: uniquePassedCandidates, percentage: uniqueCandidatesCount > 0 ? Math.round((uniquePassedCandidates / uniqueCandidatesCount) * 100) : 0 },
+        { stage: 'Master Profiles Linked', count: overview.masterLinked || 0, percentage: uniqueCandidatesCount > 0 ? Math.round(((overview.masterLinked || 0) / uniqueCandidatesCount) * 100) : 0 }
+      ]
+    };
+
+    // Application Source Analytics
+    const sourceRows = (this.db.prepare(`
+      SELECT 
+        CASE 
+          WHEN source_file LIKE '%paste%' THEN 'Direct Paste / Manual Ingestion'
+          WHEN job_url LIKE '%linkedin%' OR profile_url LIKE '%linkedin%' THEN 'LinkedIn ATS Export'
+          WHEN source_file LIKE '%.xlsx' OR source_file LIKE '%.csv' THEN 'Spreadsheet File Import'
+          ELSE 'Direct Portal Ingestion'
+        END as channel,
+        COUNT(*) as total,
+        SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as passed
+      FROM applicants
+      WHERE company = ? ${dateFilter}
+      GROUP BY channel
+      ORDER BY total DESC
+    `).all(...dateParams) as any[]) || [];
+
+    const sourceAnalytics = sourceRows.map(r => ({
+      channel: r.channel,
+      total: r.total,
+      passed: r.passed,
+      passRate: r.total > 0 ? Math.round((r.passed / r.total) * 100) : 0,
+    }));
+
+    // Data Quality Panel
+    const dqRow = (this.db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN location IS NULL OR TRIM(location) = '' OR TRIM(location) = 'United States' THEN 1 ELSE 0 END) as genericOrMissingLocation,
+        SUM(CASE WHEN phone IS NULL OR TRIM(phone) = '' THEN 1 ELSE 0 END) as missingPhone,
+        SUM(CASE WHEN email IS NULL OR TRIM(email) = '' THEN 1 ELSE 0 END) as missingEmail,
+        SUM(CASE WHEN gender IS NULL OR UPPER(gender) = 'UNSPECIFIED' THEN 1 ELSE 0 END) as unverifiedGender,
+        SUM(CASE WHEN master_person_id IS NULL OR TRIM(master_person_id) = '' THEN 1 ELSE 0 END) as unlinkedMaster
+      FROM applicants
+      WHERE company = ? ${dateFilter}
+    `).get(...dateParams) as any) || {};
+
+    const dqTotal = dqRow.total || 0;
+    const validEmailScore = dqTotal > 0 ? Math.max(0, 100 - Math.round(((dqRow.missingEmail || 0) / dqTotal) * 100)) : 100;
+    const validPhoneScore = dqTotal > 0 ? Math.max(0, 100 - Math.round(((dqRow.missingPhone || 0) / dqTotal) * 100)) : 100;
+    const dataQuality = {
+      totalAudited: dqTotal,
+      genericOrMissingLocation: dqRow.genericOrMissingLocation || 0,
+      missingPhone: dqRow.missingPhone || 0,
+      missingEmail: dqRow.missingEmail || 0,
+      unverifiedGender: dqRow.unverifiedGender || 0,
+      unlinkedMaster: dqRow.unlinkedMaster || 0,
+      healthScore: Math.round((validEmailScore + validPhoneScore) / 2),
+      note: 'Data quality checks reflect record completeness and do not automatically alter screening qualification.',
+    };
+
+    // Technology Rankings
+    const allSlotsFlat = technologyTree.flatMap(t => t.slots);
+    const technologyRankings = {
+      byVolume: [...technologyTree].sort((a, b) => b.totalApplied - a.totalApplied),
+      byPassedVolume: [...technologyTree].sort((a, b) => b.passedTotal - a.passedTotal),
+      byPassRate: [...technologyTree].sort((a, b) => b.passRate - a.passRate),
+      byDuplicates: [...technologyTree].sort((a, b) => b.duplicates - a.duplicates),
+      topSlots: [...allSlotsFlat].sort((a, b) => b.totalApplied - a.totalApplied).slice(0, 5),
+    };
+
+    // AI Recruitment Insights
+    const aiInsights: string[] = [];
+    if (comparison && comparison.hasPreviousData && comparison.deltas) {
+      const dTotal = comparison.deltas.total;
+      const pctStr = comparison.deltas.totalPct ? ` (${comparison.deltas.totalPct > 0 ? '+' : ''}${comparison.deltas.totalPct}%)` : '';
+      if (dTotal > 0) {
+        aiInsights.push(`Application intake expanded by +${dTotal.toLocaleString()} occurrences${pctStr} compared to the preceding period.`);
+      } else if (dTotal < 0) {
+        aiInsights.push(`Application volume decreased by ${Math.abs(dTotal).toLocaleString()} occurrences${pctStr} compared to the preceding period.`);
+      }
+    }
+    if (technologyTree.length > 0) {
+      const topTech = technologyTree[0];
+      aiInsights.push(`${topTech.technology} represents the primary intake volume with ${topTech.totalApplied.toLocaleString()} applications (${topTech.passedTotal} passed, ${topTech.passRate}% pass rate).`);
+      const highestPassTech = [...technologyTree].sort((a, b) => b.passRate - a.passRate)[0];
+      if (highestPassTech && highestPassTech.technology !== topTech.technology) {
+        aiInsights.push(`${highestPassTech.technology} recorded the highest screening pass rate across domains at ${highestPassTech.passRate}%.`);
+      }
+    }
+    if (top5Locations.length > 0) {
+      aiInsights.push(`Candidate talent is heavily concentrated in ${top5Locations[0].name} (${top5Locations[0].count} passed) and ${top5Locations[1]?.name || 'neighboring metropolitan hubs'}.`);
+    }
+    if (duplicates > 0) {
+      const dupPct = total > 0 ? Math.round((duplicates / total) * 100) : 0;
+      aiInsights.push(`Repeat submissions comprise ${dupPct}% (${duplicates.toLocaleString()}) of applications, quarantined automatically to maintain recruiter efficiency.`);
+    }
 
     // Cross-Technology Analytics (Section 13)
     const crossTechnology = this.getCrossTechnologyAnalytics(company);
@@ -2495,6 +3594,7 @@ export class DatabaseService {
       company,
       totalApplications: total,
       passedCount: passed,
+      uniquePassedCandidates,
       failedCount: failed,
       manualReviewCount: manualReview,
       approvedLeadsCount: approved,
@@ -2516,7 +3616,670 @@ export class DatabaseService {
       crossTechnology,
       dailyTrend: trendRows,
       dailyBreakdown: trendRows,
+      demographics,
+      geographicDistribution,
+      technologyTree,
+      funnel,
+      sourceAnalytics,
+      dataQuality,
+      technologyRankings,
+      aiInsights,
+      availableMonths: this.getAvailableReportingMonths(company),
     };
+  }
+
+  // --- Available Reporting Months ---
+  getAvailableReportingMonths(company: string = 'ClinisolTech'): Array<{ month: string; label: string; total: number }> {
+    const monthsMap = new Map<string, number>();
+
+    const appMonths = (this.db.prepare(`
+      SELECT strftime('%Y-%m', application_date) as m, count(*) as c
+      FROM applicants
+      WHERE company = ? AND application_date IS NOT NULL AND application_date != ''
+      GROUP BY m
+    `).all(company) as any[]) || [];
+    for (const r of appMonths) {
+      if (r.m) monthsMap.set(r.m, Math.max(monthsMap.get(r.m) || 0, r.c));
+    }
+
+    const masterMonths = (this.db.prepare(`
+      SELECT strftime('%Y-%m', COALESCE(application_collected_date, date_applied)) as m, count(*) as c
+      FROM master_applications
+      WHERE company = ? AND COALESCE(application_collected_date, date_applied) IS NOT NULL
+      GROUP BY m
+    `).all(company) as any[]) || [];
+    for (const r of masterMonths) {
+      if (r.m) monthsMap.set(r.m, Math.max(monthsMap.get(r.m) || 0, r.c));
+    }
+
+    const monthLabels: Record<string, string> = {
+      '01': 'January', '02': 'February', '03': 'March', '04': 'April',
+      '05': 'May', '06': 'June', '07': 'July', '08': 'August',
+      '09': 'September', '10': 'October', '11': 'November', '12': 'December',
+    };
+
+    return Array.from(monthsMap.entries())
+      .filter(([m]) => m && m.length === 7)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([month, total]) => {
+        const [y, m] = month.split('-');
+        const label = `${monthLabels[m] || m} ${y}`;
+        return { month, label, total };
+      });
+  }
+
+  // --- Fast Month Summary for Reporting & Comparison ---
+  getMonthSummary(company: string = 'ClinisolTech', monthKey: string) {
+    const monthLabels: Record<string, string> = {
+      '01': 'January', '02': 'February', '03': 'March', '04': 'April',
+      '05': 'May', '06': 'June', '07': 'July', '08': 'August',
+      '09': 'September', '10': 'October', '11': 'November', '12': 'December',
+    };
+    const [y, m] = monthKey.split('-');
+    const label = `${monthLabels[m] || m} ${y}`;
+
+    const appStats = (this.db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as passed,
+        SUM(CASE WHEN effective_result = 'FAIL' THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN effective_result = 'MANUAL_REVIEW' THEN 1 ELSE 0 END) as inReview,
+        SUM(CASE WHEN is_duplicate = 1 THEN 1 ELSE 0 END) as duplicates,
+        COUNT(DISTINCT COALESCE(NULLIF(email, ''), NULLIF(phone, ''), full_name)) as uniqueCandidates
+      FROM applicants
+      WHERE company = ? AND application_date LIKE ?
+    `).get(company, `${monthKey}%`) as any) || {};
+
+    const masterStats = (this.db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as passed,
+        SUM(CASE WHEN effective_result = 'FAIL' THEN 1 ELSE 0 END) as failed,
+        COUNT(DISTINCT person_id) as uniqueCandidates
+      FROM master_applications
+      WHERE company = ? AND (application_collected_date LIKE ? OR date_applied LIKE ?)
+    `).get(company, `${monthKey}%`, `${monthKey}%`) as any) || {};
+
+    const useMaster = (appStats.total || 0) === 0 && (masterStats.total || 0) > 0;
+    const total = useMaster ? masterStats.total || 0 : appStats.total || 0;
+    const passed = useMaster ? masterStats.passed || 0 : appStats.passed || 0;
+    const failed = useMaster ? masterStats.failed || 0 : appStats.failed || 0;
+    const duplicates = useMaster ? 0 : appStats.duplicates || 0;
+    const inReview = useMaster ? 0 : appStats.inReview || 0;
+    const uniqueCandidates = useMaster ? masterStats.uniqueCandidates || 0 : appStats.uniqueCandidates || 0;
+    const passRate = total > 0 ? Math.round((passed / total) * 100) : 0;
+
+    // Tech breakdown
+    let technologies: any[] = [];
+    if (useMaster) {
+      const rawMasterTech = (this.db.prepare(`
+        SELECT 
+          COALESCE(technology, job_title, 'General') as tech,
+          COUNT(*) as total,
+          SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as passed
+        FROM master_applications
+        WHERE company = ? AND (application_collected_date LIKE ? OR date_applied LIKE ?)
+        GROUP BY COALESCE(technology, job_title, 'General')
+      `).all(company, `${monthKey}%`, `${monthKey}%`) as any[]) || [];
+
+      const techAgg = new Map<string, { total: number; passed: number }>();
+      for (const r of rawMasterTech) {
+        const cat = getTechCategory(r.tech);
+        const existing = techAgg.get(cat) || { total: 0, passed: 0 };
+        existing.total += r.total;
+        existing.passed += r.passed;
+        techAgg.set(cat, existing);
+      }
+      technologies = Array.from(techAgg.entries()).map(([technology, stats]) => ({
+        technology,
+        total: stats.total,
+        passed: stats.passed,
+        passRate: stats.total > 0 ? Math.round((stats.passed / stats.total) * 100) : 0,
+      })).sort((a, b) => b.total - a.total);
+    } else {
+      const rawAppTech = (this.db.prepare(`
+        SELECT 
+          normalized_role as tech,
+          job_title,
+          COUNT(*) as total,
+          SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as passed,
+          SUM(CASE WHEN is_duplicate = 1 THEN 1 ELSE 0 END) as duplicates,
+          SUM(CASE WHEN effective_result = 'FAIL' THEN 1 ELSE 0 END) as failed
+        FROM applicants
+        WHERE company = ? AND application_date LIKE ?
+        GROUP BY normalized_role, job_title
+      `).all(company, `${monthKey}%`) as any[]) || [];
+
+      const techAgg = new Map<string, { total: number; passed: number }>();
+      for (const r of rawAppTech) {
+        const cat = getTechCategory(r.job_title || r.tech);
+        const existing = techAgg.get(cat) || { total: 0, passed: 0 };
+        existing.total += r.total;
+        existing.passed += r.passed;
+        techAgg.set(cat, existing);
+      }
+      technologies = Array.from(techAgg.entries()).map(([technology, stats]) => ({
+        technology,
+        total: stats.total,
+        passed: stats.passed,
+        passRate: stats.total > 0 ? Math.round((stats.passed / stats.total) * 100) : 0,
+      })).sort((a, b) => b.total - a.total);
+    }
+
+    // Detailed Demographics, Locations & Child Slots
+    let maleCount = 0;
+    let femaleCount = 0;
+    let unspecifiedCount = 0;
+    let locations: Array<{ name: string; count: number; percentage: number }> = [];
+    let techSlotsTree: any[] = [];
+
+    if (useMaster) {
+      const demoRows = (this.db.prepare(`
+        SELECT UPPER(COALESCE(mp.gender, 'UNSPECIFIED')) as g, COUNT(DISTINCT mp.id) as count
+        FROM master_applications ma
+        LEFT JOIN master_people mp ON ma.person_id = mp.id
+        WHERE ma.company = ? AND ma.effective_result = 'PASS' AND (ma.application_collected_date LIKE ? OR ma.date_applied LIKE ?)
+        GROUP BY UPPER(COALESCE(mp.gender, 'UNSPECIFIED'))
+      `).all(company, `${monthKey}%`, `${monthKey}%`) as any[]) || [];
+      for (const r of demoRows) {
+        if (r.g.startsWith('M')) maleCount += r.count;
+        else if (r.g.startsWith('F')) femaleCount += r.count;
+        else unspecifiedCount += r.count;
+      }
+
+      const locRows = (this.db.prepare(`
+        SELECT mp.location, COUNT(DISTINCT mp.id) as count
+        FROM master_applications ma
+        LEFT JOIN master_people mp ON ma.person_id = mp.id
+        WHERE ma.company = ? AND ma.effective_result = 'PASS' AND (ma.application_collected_date LIKE ? OR ma.date_applied LIKE ?)
+        GROUP BY mp.location
+      `).all(company, `${monthKey}%`, `${monthKey}%`) as any[]) || [];
+      const locAgg = new Map<string, number>();
+      for (const r of locRows) {
+        const canon = canonicalizeLocation(r.location);
+        locAgg.set(canon, (locAgg.get(canon) || 0) + r.count);
+      }
+      locations = Array.from(locAgg.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({
+        name,
+        count,
+        percentage: passed > 0 ? Math.round((count / passed) * 100) : 0,
+      }));
+
+      const slotRows = (this.db.prepare(`
+        SELECT 
+          ma.job_id,
+          ma.job_title,
+          UPPER(COALESCE(mp.gender, 'UNSPECIFIED')) as gender,
+          ma.effective_result,
+          0 as is_duplicate
+        FROM master_applications ma
+        LEFT JOIN master_people mp ON ma.person_id = mp.id
+        WHERE ma.company = ? AND (ma.application_collected_date LIKE ? OR ma.date_applied LIKE ?)
+      `).all(company, `${monthKey}%`, `${monthKey}%`) as any[]) || [];
+      techSlotsTree = this.aggregateTechSlots(slotRows);
+    } else {
+      const demoRows = (this.db.prepare(`
+        SELECT UPPER(COALESCE(mp.gender, a.gender, 'UNSPECIFIED')) as g, COUNT(DISTINCT COALESCE(NULLIF(a.email, ''), NULLIF(a.phone, ''), a.full_name)) as count
+        FROM applicants a
+        LEFT JOIN master_people mp ON a.master_person_id = mp.id OR a.master_person_id = mp.person_id
+        WHERE a.company = ? AND a.effective_result = 'PASS' AND a.application_date LIKE ?
+        GROUP BY UPPER(COALESCE(mp.gender, a.gender, 'UNSPECIFIED'))
+      `).all(company, `${monthKey}%`) as any[]) || [];
+      for (const r of demoRows) {
+        if (r.g.startsWith('M')) maleCount += r.count;
+        else if (r.g.startsWith('F')) femaleCount += r.count;
+        else unspecifiedCount += r.count;
+      }
+
+      const locRows = (this.db.prepare(`
+        SELECT a.location, COUNT(DISTINCT COALESCE(NULLIF(a.email, ''), NULLIF(a.phone, ''), a.full_name)) as count
+        FROM applicants a
+        WHERE a.company = ? AND a.effective_result = 'PASS' AND a.application_date LIKE ?
+        GROUP BY a.location
+      `).all(company, `${monthKey}%`) as any[]) || [];
+      const locAgg = new Map<string, number>();
+      for (const r of locRows) {
+        const canon = canonicalizeLocation(r.location);
+        locAgg.set(canon, (locAgg.get(canon) || 0) + r.count);
+      }
+      locations = Array.from(locAgg.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({
+        name,
+        count,
+        percentage: passed > 0 ? Math.round((count / passed) * 100) : 0,
+      }));
+
+      const slotRows = (this.db.prepare(`
+        SELECT 
+          a.job_id,
+          a.job_title,
+          UPPER(COALESCE(mp.gender, a.gender, 'UNSPECIFIED')) as gender,
+          a.effective_result,
+          a.is_duplicate
+        FROM applicants a
+        LEFT JOIN master_people mp ON a.master_person_id = mp.id OR a.master_person_id = mp.person_id
+        WHERE a.company = ? AND a.application_date LIKE ?
+      `).all(company, `${monthKey}%`) as any[]) || [];
+      techSlotsTree = this.aggregateTechSlots(slotRows);
+    }
+
+    const totalVerifiedGender = maleCount + femaleCount;
+    const demographics = {
+      maleCount,
+      femaleCount,
+      unspecifiedCount,
+      malePct: totalVerifiedGender > 0 ? Math.round((maleCount / totalVerifiedGender) * 100) : 0,
+      femalePct: totalVerifiedGender > 0 ? Math.round((femaleCount / totalVerifiedGender) * 100) : 0,
+      unspecifiedPct: passed > 0 ? Math.round((unspecifiedCount / passed) * 100) : 0,
+      totalVerified: totalVerifiedGender,
+    };
+
+    return {
+      month: monthKey,
+      label,
+      total,
+      passed,
+      failed,
+      duplicates,
+      inReview,
+      uniqueCandidates,
+      passRate,
+      demographics,
+      locations,
+      technologies,
+      techSlotsTree,
+    };
+  }
+
+  // --- Helper to aggregate Technology & Job Slot Tree ---
+  private aggregateTechSlots(rows: any[]) {
+    const map = new Map<string, any>();
+    for (const r of rows) {
+      const tech = getTechCategory(r.job_title, r.job_id);
+      const slotKey = r.job_id || r.job_title || 'Unknown Requisition';
+      const slotTitle = r.job_title || r.job_id;
+
+      if (!map.has(tech)) {
+        map.set(tech, {
+          technology: tech,
+          total: 0,
+          passed: 0,
+          passedMale: 0,
+          passedFemale: 0,
+          passedUnspecified: 0,
+          duplicates: 0,
+          failed: 0,
+          slots: new Map<string, any>(),
+        });
+      }
+      const t = map.get(tech)!;
+      t.total++;
+      if (r.is_duplicate === 1) t.duplicates++;
+      if (r.effective_result === 'FAIL') t.failed++;
+
+      if (!t.slots.has(slotKey)) {
+        t.slots.set(slotKey, {
+          jobId: r.job_id || 'N/A',
+          jobTitle: slotTitle,
+          total: 0,
+          passed: 0,
+          passedMale: 0,
+          passedFemale: 0,
+          passedUnspecified: 0,
+          duplicates: 0,
+          failed: 0,
+        });
+      }
+      const s = t.slots.get(slotKey)!;
+      s.total++;
+      if (r.is_duplicate === 1) s.duplicates++;
+      if (r.effective_result === 'FAIL') s.failed++;
+
+      if (r.effective_result === 'PASS') {
+        t.passed++;
+        s.passed++;
+        const g = (r.gender || '').toUpperCase();
+        if (g.startsWith('M')) {
+          t.passedMale++;
+          s.passedMale++;
+        } else if (g.startsWith('F')) {
+          t.passedFemale++;
+          s.passedFemale++;
+        } else {
+          t.passedUnspecified++;
+          s.passedUnspecified++;
+        }
+      }
+    }
+
+    return Array.from(map.values()).map(t => {
+      const slots = Array.from(t.slots.values()).map((s: any) => ({
+        ...s,
+        passRate: s.total > 0 ? Math.round((s.passed / s.total) * 100) : 0,
+        formattedPassed: `${s.passed} (M: ${s.passedMale} | F: ${s.passedFemale})`,
+      })).sort((a: any, b: any) => b.total - a.total);
+      return {
+        ...t,
+        passRate: t.total > 0 ? Math.round((t.passed / t.total) * 100) : 0,
+        formattedPassed: `${t.passed} (M: ${t.passedMale} | F: ${t.passedFemale})`,
+        slots,
+      };
+    }).sort((a, b) => b.total - a.total);
+  }
+
+  // --- Dedicated Month-over-Month Comparison Engine ---
+  getMonthComparison(company: string = 'ClinisolTech', monthA: string = '2026-10', monthB: string = '2026-09') {
+    const dataA = this.getMonthSummary(company, monthA);
+    const dataB = this.getMonthSummary(company, monthB);
+
+    const deltaTotal = dataA.total - dataB.total;
+    const deltaTotalPct = dataB.total > 0 ? Math.round((deltaTotal / dataB.total) * 100) : 0;
+
+    const deltaPassed = dataA.passed - dataB.passed;
+    const deltaPassedPct = dataB.passed > 0 ? Math.round((deltaPassed / dataB.passed) * 100) : 0;
+
+    const deltaPassRate = dataA.passRate - dataB.passRate;
+    const deltaDuplicates = dataA.duplicates - dataB.duplicates;
+    const deltaFailed = dataA.failed - dataB.failed;
+    const deltaUniqueCandidates = dataA.uniqueCandidates - dataB.uniqueCandidates;
+    const deltaMalePassed = (dataA.demographics?.maleCount || 0) - (dataB.demographics?.maleCount || 0);
+    const deltaFemalePassed = (dataA.demographics?.femaleCount || 0) - (dataB.demographics?.femaleCount || 0);
+
+    // Cross-tech comparison with child slots
+    const techMap = new Map<string, any>();
+    for (const t of dataA.techSlotsTree) {
+      techMap.set(t.technology, {
+        technology: t.technology,
+        monthA: { total: t.total, passed: t.passed, passRate: t.passRate, formattedPassed: t.formattedPassed, slots: t.slots },
+        monthB: { total: 0, passed: 0, passRate: 0, formattedPassed: '0 (M: 0 | F: 0)', slots: [] },
+      });
+    }
+    for (const t of dataB.techSlotsTree) {
+      if (!techMap.has(t.technology)) {
+        techMap.set(t.technology, {
+          technology: t.technology,
+          monthA: { total: 0, passed: 0, passRate: 0, formattedPassed: '0 (M: 0 | F: 0)', slots: [] },
+          monthB: { total: t.total, passed: t.passed, passRate: t.passRate, formattedPassed: t.formattedPassed, slots: t.slots },
+        });
+      } else {
+        techMap.get(t.technology)!.monthB = { total: t.total, passed: t.passed, passRate: t.passRate, formattedPassed: t.formattedPassed, slots: t.slots };
+      }
+    }
+
+    const techComparison = Array.from(techMap.values()).map(tc => {
+      const dTotal = tc.monthA.total - tc.monthB.total;
+      const dTotalPct = tc.monthB.total > 0 ? Math.round((dTotal / tc.monthB.total) * 100) : 0;
+      const dPassed = tc.monthA.passed - tc.monthB.passed;
+      return {
+        technology: tc.technology,
+        monthA: tc.monthA,
+        monthB: tc.monthB,
+        deltaTotal: dTotal,
+        deltaTotalPct: dTotalPct,
+        deltaPassed: dPassed,
+      };
+    }).sort((a, b) => b.monthA.total - a.monthA.total);
+
+    // Locations Comparison
+    const locMap = new Map<string, { monthA: number; monthB: number }>();
+    for (const l of (dataA.locations || [])) {
+      locMap.set(l.name, { monthA: l.count, monthB: 0 });
+    }
+    for (const l of (dataB.locations || [])) {
+      if (!locMap.has(l.name)) locMap.set(l.name, { monthA: 0, monthB: l.count });
+      else locMap.get(l.name)!.monthB = l.count;
+    }
+    const locationsComparison = Array.from(locMap.entries()).map(([name, counts]) => ({
+      name,
+      monthA: counts.monthA,
+      monthB: counts.monthB,
+      delta: counts.monthA - counts.monthB,
+    })).sort((a, b) => b.monthA - a.monthA).slice(0, 7);
+
+    // Multi-Month Timeline of All Available Months
+    const availableMonths = this.getAvailableReportingMonths(company);
+    const allMonthsTimeline = availableMonths.map((m, idx) => {
+      const summary = this.getMonthSummary(company, m.month);
+      const priorMonth = availableMonths[idx + 1];
+      const prior = priorMonth ? this.getMonthSummary(company, priorMonth.month) : null;
+      const growthVsPrior = prior && prior.total > 0 ? Math.round(((summary.total - prior.total) / prior.total) * 100) : 0;
+      const passedGrowthVsPrior = prior && prior.passed > 0 ? Math.round(((summary.passed - prior.passed) / prior.passed) * 100) : 0;
+      return {
+        ...summary,
+        growthVsPrior,
+        passedGrowthVsPrior,
+      };
+    });
+
+    return {
+      monthA: dataA,
+      monthB: dataB,
+      comparison: {
+        deltaTotal,
+        deltaTotalPct,
+        deltaPassed,
+        deltaPassedPct,
+        deltaPassRate,
+        deltaDuplicates,
+        deltaFailed,
+        deltaUniqueCandidates,
+        deltaMalePassed,
+        deltaFemalePassed,
+      },
+      techComparison,
+      locationsComparison,
+      allMonthsTimeline,
+    };
+  }
+
+  // --- Available Reporting Months ---
+  getAvailableReportingMonths(company: string = 'ClinisolTech'): Array<{ month: string; label: string; total: number }> {
+    const monthsMap = new Map<string, number>();
+
+    const appMonths = (this.db.prepare(`
+      SELECT strftime('%Y-%m', application_date) as m, count(*) as c
+      FROM applicants
+      WHERE company = ? AND application_date IS NOT NULL AND application_date != ''
+      GROUP BY m
+    `).all(company) as any[]) || [];
+    for (const r of appMonths) {
+      if (r.m) monthsMap.set(r.m, Math.max(monthsMap.get(r.m) || 0, r.c));
+    }
+
+    const masterMonths = (this.db.prepare(`
+      SELECT strftime('%Y-%m', COALESCE(application_collected_date, date_applied)) as m, count(*) as c
+      FROM master_applications
+      WHERE company = ? AND COALESCE(application_collected_date, date_applied) IS NOT NULL
+      GROUP BY m
+    `).all(company) as any[]) || [];
+    for (const r of masterMonths) {
+      if (r.m) monthsMap.set(r.m, Math.max(monthsMap.get(r.m) || 0, r.c));
+    }
+
+    const monthLabels: Record<string, string> = {
+      '01': 'January', '02': 'February', '03': 'March', '04': 'April',
+      '05': 'May', '06': 'June', '07': 'July', '08': 'August',
+      '09': 'September', '10': 'October', '11': 'November', '12': 'December',
+    };
+
+    return Array.from(monthsMap.entries())
+      .filter(([m]) => m && m.length === 7)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([month, total]) => {
+        const [y, m] = month.split('-');
+        const label = `${monthLabels[m] || m} ${y}`;
+        return { month, label, total };
+      });
+  }
+
+
+
+  // --- Recruitment Report Drilldown Records Endpoint ---
+  getReportDrilldownRecords(params: {
+    company?: string;
+    filterType?: 'all' | 'passed' | 'failed' | 'duplicates' | 'inReview' | 'location' | 'jobSlot' | 'technology';
+    filterValue?: string;
+    period?: 'daily' | 'weekly' | 'monthly' | 'custom' | 'all';
+    dateStr?: string;
+    startDate?: string;
+    endDate?: string;
+    search?: string;
+    page?: number;
+    pageSize?: number;
+  }) {
+    const company = params.company || 'ClinisolTech';
+    const filterType = params.filterType || 'all';
+    const filterValue = params.filterValue || '';
+    const period = params.period || 'all';
+    const targetDate = params.dateStr || new Date().toISOString().split('T')[0];
+    const page = Math.max(1, params.page || 1);
+    const pageSize = Math.min(100, Math.max(5, params.pageSize || 20));
+    const offset = (page - 1) * pageSize;
+
+    const whereClauses = ['company = ?'];
+    const queryParams: any[] = [company];
+
+    if (period === 'daily') {
+      whereClauses.push('application_date = ?');
+      queryParams.push(targetDate);
+    } else if (period === 'weekly') {
+      whereClauses.push("application_date >= date(?, '-7 days') AND application_date <= ?");
+      queryParams.push(targetDate, targetDate);
+    } else if (period === 'monthly') {
+      const monthPrefix = targetDate.slice(0, 7);
+      whereClauses.push("application_date LIKE ?");
+      queryParams.push(`${monthPrefix}%`);
+    } else if (period === 'custom' && params.startDate && params.endDate) {
+      whereClauses.push("application_date >= ? AND application_date <= ?");
+      queryParams.push(params.startDate, params.endDate);
+    }
+
+    if (filterType === 'passed') {
+      whereClauses.push("effective_result = 'PASS'");
+    } else if (filterType === 'passed_male') {
+      whereClauses.push("effective_result = 'PASS' AND UPPER(gender) LIKE 'M%'");
+    } else if (filterType === 'passed_female') {
+      whereClauses.push("effective_result = 'PASS' AND UPPER(gender) LIKE 'F%'");
+    } else if (filterType === 'passed_unspecified') {
+      whereClauses.push("effective_result = 'PASS' AND (gender IS NULL OR (UPPER(gender) NOT LIKE 'M%' AND UPPER(gender) NOT LIKE 'F%'))");
+    } else if (filterType === 'failed') {
+      whereClauses.push("effective_result = 'FAIL'");
+    } else if (filterType === 'duplicates') {
+      whereClauses.push("is_duplicate = 1");
+    } else if (filterType === 'inReview') {
+      whereClauses.push("effective_result = 'MANUAL_REVIEW'");
+    } else if (filterType === 'jobSlot' && filterValue) {
+      whereClauses.push("(job_id = ? OR job_title = ?)");
+      queryParams.push(filterValue, filterValue);
+    } else if (filterType === 'technology' && filterValue) {
+      whereClauses.push("(normalized_role = ? OR job_title LIKE ?)");
+      queryParams.push(filterValue, `%${filterValue}%`);
+    } else if (filterType === 'location' && filterValue) {
+      if (filterValue.toLowerCase().includes('other')) {
+        // Leave generic if other
+      } else {
+        whereClauses.push("location LIKE ?");
+        queryParams.push(`%${filterValue}%`);
+      }
+    }
+
+    if (params.search && params.search.trim()) {
+      whereClauses.push("(full_name LIKE ? OR email LIKE ? OR location LIKE ? OR job_title LIKE ?)");
+      const s = `%${params.search.trim()}%`;
+      queryParams.push(s, s, s, s);
+    }
+
+    const whereStr = whereClauses.join(' AND ');
+
+    const countQuery = `SELECT COUNT(*) as total FROM applicants WHERE ${whereStr}`;
+    const totalRow = (this.db.prepare(countQuery).get(...queryParams) as any) || {};
+    let total = totalRow.total || 0;
+
+    if (total === 0 && period === 'monthly') {
+      const monthPrefix = targetDate.slice(0, 7);
+      const masterWhere = ['ma.company = ?', '(ma.application_collected_date LIKE ? OR ma.date_applied LIKE ?)'];
+      const masterParams: any[] = [company, `${monthPrefix}%`, `${monthPrefix}%`];
+
+      if (filterType === 'passed') {
+        masterWhere.push("ma.effective_result = 'PASS'");
+      } else if (filterType === 'passed_male') {
+        masterWhere.push("ma.effective_result = 'PASS' AND UPPER(mp.gender) LIKE 'M%'");
+      } else if (filterType === 'passed_female') {
+        masterWhere.push("ma.effective_result = 'PASS' AND UPPER(mp.gender) LIKE 'F%'");
+      } else if (filterType === 'passed_unspecified') {
+        masterWhere.push("ma.effective_result = 'PASS' AND (mp.gender IS NULL OR (UPPER(mp.gender) NOT LIKE 'M%' AND UPPER(mp.gender) NOT LIKE 'F%'))");
+      } else if (filterType === 'failed') {
+        masterWhere.push("ma.effective_result = 'FAIL'");
+      } else if (filterType === 'technology' && filterValue) {
+        masterWhere.push("(ma.technology LIKE ? OR ma.job_title LIKE ?)");
+        masterParams.push(`%${filterValue}%`, `%${filterValue}%`);
+      } else if (filterType === 'location' && filterValue && !filterValue.toLowerCase().includes('other')) {
+        masterWhere.push("mp.location LIKE ?");
+        masterParams.push(`%${filterValue}%`);
+      }
+
+      if (params.search && params.search.trim()) {
+        masterWhere.push("(mp.full_name LIKE ? OR mp.primary_email LIKE ? OR ma.job_title LIKE ?)");
+        const s = `%${params.search.trim()}%`;
+        masterParams.push(s, s, s);
+      }
+
+      const masterWhereStr = masterWhere.join(' AND ');
+      const masterCountRow = (this.db.prepare(`
+        SELECT COUNT(*) as total 
+        FROM master_applications ma 
+        LEFT JOIN master_people mp ON ma.person_id = mp.id 
+        WHERE ${masterWhereStr}
+      `).get(...masterParams) as any) || {};
+
+      const masterTotal = masterCountRow.total || 0;
+      if (masterTotal > 0) {
+        const masterRows = (this.db.prepare(`
+          SELECT 
+            ma.id,
+            COALESCE(mp.full_name, 'Unknown') as fullName,
+            mp.primary_email as email,
+            mp.primary_phone as phone,
+            mp.location as location,
+            ma.job_id as jobId,
+            ma.job_title as jobTitle,
+            COALESCE(ma.application_collected_date, ma.date_applied) as applicationDate,
+            ma.effective_result as effectiveResult,
+            0 as isDuplicate,
+            ma.person_id as masterPersonId,
+            mp.gender
+          FROM master_applications ma
+          LEFT JOIN master_people mp ON ma.person_id = mp.id
+          WHERE ${masterWhereStr}
+          ORDER BY applicationDate DESC, ma.id DESC
+          LIMIT ? OFFSET ?
+        `).all(...masterParams, pageSize, offset) as any[]) || [];
+
+        return { total: masterTotal, page, pageSize, records: masterRows };
+      }
+    }
+
+    const selectQuery = `
+      SELECT 
+        id,
+        full_name as fullName,
+        email,
+        phone,
+        location,
+        job_id as jobId,
+        job_title as jobTitle,
+        application_date as applicationDate,
+        effective_result as effectiveResult,
+        is_duplicate as isDuplicate,
+        master_person_id as masterPersonId,
+        gender
+      FROM applicants
+      WHERE ${whereStr}
+      ORDER BY application_date DESC, id DESC
+      LIMIT ? OFFSET ?
+    `;
+    const records = (this.db.prepare(selectQuery).all(...queryParams, pageSize, offset) as any[]) || [];
+
+    return { total, page, pageSize, records };
   }
 
   // --- Cross-Technology Analytics (Section 13) ---
@@ -2579,6 +4342,7 @@ export class DatabaseService {
   getApplicantTabCounts(filters: {
     company?: string;
     batchId?: string;
+    viewMode?: 'working_batch' | 'permanent_history';
     applicationDate?: string;
     startDate?: string;
     endDate?: string;
@@ -2589,12 +4353,13 @@ export class DatabaseService {
     normalizedRole?: string;
     isDuplicate?: boolean;
     activeBatchOnly?: boolean;
-  }): { pass: number; fail: number; review: number; all: number } {
+  }): { pass: number; allPassed: number; fail: number; review: number; duplicate: number; all: number; uniquePassed: number } {
     const { whereClause, values } = this.buildApplicantWhereClause({
       page: 1,
       pageSize: 1,
       company: filters.company,
       batchId: filters.batchId,
+      viewMode: filters.viewMode,
       applicationDate: filters.applicationDate,
       startDate: filters.startDate,
       endDate: filters.endDate,
@@ -2610,19 +4375,32 @@ export class DatabaseService {
     const sql = `
       SELECT
         COUNT(*) as total,
-        SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as passed,
-        SUM(CASE WHEN effective_result = 'FAIL' THEN 1 ELSE 0 END) as failed,
-        SUM(CASE WHEN effective_result = 'MANUAL_REVIEW' THEN 1 ELSE 0 END) as manualReview
+        SUM(CASE WHEN effective_result = 'PASS' AND (is_duplicate = 0 OR is_duplicate IS NULL) THEN 1 ELSE 0 END) as passed,
+        SUM(CASE WHEN effective_result = 'PASS' THEN 1 ELSE 0 END) as allPassed,
+        SUM(CASE WHEN effective_result = 'FAIL' AND (is_duplicate = 0 OR is_duplicate IS NULL) THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN (effective_result = 'MANUAL_REVIEW' OR effective_result = 'ERROR') AND (is_duplicate = 0 OR is_duplicate IS NULL) THEN 1 ELSE 0 END) as manualReview,
+        SUM(CASE WHEN is_duplicate = 1 THEN 1 ELSE 0 END) as duplicates
       FROM applicants
       ${whereClause}
     `;
 
     const row = this.db.prepare(sql).get(...values) as any;
+
+    const passCount = Number(row?.passed || 0);
+    const allPassedCount = Number(row?.allPassed || 0);
+    const failCount = Number(row?.failed || 0);
+    const reviewCount = Number(row?.manualReview || 0);
+    const duplicateCount = Number(row?.duplicates || 0);
+    const totalCount = Number(row?.total || 0);
+
     return {
-      pass: Number(row?.passed || 0),
-      fail: Number(row?.failed || 0),
-      review: Number(row?.manualReview || 0),
-      all: Number(row?.total || 0),
+      pass: passCount,
+      allPassed: allPassedCount,
+      fail: failCount,
+      review: reviewCount,
+      duplicate: duplicateCount,
+      all: totalCount,
+      uniquePassed: passCount,
     };
   }
 
@@ -2663,8 +4441,53 @@ export class DatabaseService {
       values.push(filters.company);
     }
     if (filters.status && filters.status !== 'ALL') {
-      conditions.push('effective_result = ?');
-      values.push(filters.status);
+      if (filters.status === 'ALL_PASSED' || filters.status === 'PASS_ALL') {
+        conditions.push("effective_result = 'PASS'");
+      } else if (filters.status === 'UNIQUE_PASSED') {
+        conditions.push("effective_result = 'PASS'");
+        conditions.push('(is_duplicate = 0 OR is_duplicate IS NULL)');
+
+        const compVal = (filters.company === 'AaraTech' || filters.company === 'ClinisolTech') ? filters.company : 'ClinisolTech';
+        conditions.push(`(
+          (transfer_status = 'Transferred' AND id IN (
+            SELECT screening_applicant_id FROM master_transfers WHERE duplicate_check_result = 'NEW CANDIDATE + NEW APPLICATION'
+          ))
+          OR
+          ((transfer_status IS NULL OR transfer_status != 'Transferred') AND (
+            (email IS NULL OR email = '' OR email NOT IN (
+              SELECT primary_email FROM master_people WHERE company = ? AND primary_email IS NOT NULL AND primary_email != ''
+            ))
+            AND (
+              phone IS NULL OR phone = '' OR SUBSTR(REPLACE(REPLACE(REPLACE(phone, '-', ''), ' ', ''), '+', ''), -10) NOT IN (
+                SELECT SUBSTR(REPLACE(REPLACE(REPLACE(primary_phone, '-', ''), ' ', ''), '+', ''), -10) FROM master_people WHERE company = ? AND primary_phone IS NOT NULL AND primary_phone != ''
+              )
+            )
+          ))
+        )`);
+        values.push(compVal, compVal);
+
+        let subWhere = "company = ? AND effective_result = 'PASS'";
+        let subValues: any[] = [compVal];
+        if (filters.applicationDate && filters.applicationDate !== 'ALL') {
+          subWhere += ' AND application_date = ?';
+          subValues.push(filters.applicationDate);
+        }
+        if (filters.importId && filters.importId !== 'ALL') {
+          subWhere += ' AND (import_id = ? OR batch_id = ?)';
+          subValues.push(filters.importId, filters.importId);
+        }
+
+        conditions.push(`id IN (
+          SELECT MIN(a_inner.id)
+          FROM applicants a_inner
+          WHERE ${subWhere}
+          GROUP BY COALESCE(NULLIF(LOWER(TRIM(a_inner.email)), ''), SUBSTR(REPLACE(REPLACE(REPLACE(a_inner.phone, '-', ''), ' ', ''), '+', ''), -10), LOWER(TRIM(a_inner.full_name)))
+        )`);
+        values.push(...subValues);
+      } else {
+        conditions.push('effective_result = ?');
+        values.push(filters.status);
+      }
     }
     if (filters.gender && filters.gender !== 'ALL') {
       conditions.push('gender = ?');
@@ -2715,13 +4538,24 @@ export class DatabaseService {
       conditions.push('(is_duplicate = 0 OR is_duplicate IS NULL)');
     }
 
-    if (filters.onlyNewCandidates && filters.company && filters.company !== 'All' && filters.company !== 'Both') {
+    if (filters.onlyNewCandidates && filters.status !== 'UNIQUE_PASSED' && filters.company && filters.company !== 'All' && filters.company !== 'Both') {
       conditions.push(`(
-        master_person_id IS NULL OR master_person_id NOT IN (
-          SELECT person_id FROM master_applications WHERE company = ? GROUP BY person_id HAVING COUNT(*) > 1
-        )
+        (transfer_status = 'Transferred' AND id IN (
+          SELECT screening_applicant_id FROM master_transfers WHERE duplicate_check_result = 'NEW CANDIDATE + NEW APPLICATION'
+        ))
+        OR
+        ((transfer_status IS NULL OR transfer_status != 'Transferred') AND (
+          (email IS NULL OR email = '' OR email NOT IN (
+            SELECT primary_email FROM master_people WHERE company = ? AND primary_email IS NOT NULL AND primary_email != ''
+          ))
+          AND (
+            phone IS NULL OR phone = '' OR SUBSTR(REPLACE(REPLACE(REPLACE(phone, '-', ''), ' ', ''), '+', ''), -10) NOT IN (
+              SELECT SUBSTR(REPLACE(REPLACE(REPLACE(primary_phone, '-', ''), ' ', ''), '+', ''), -10) FROM master_people WHERE company = ? AND primary_phone IS NOT NULL AND primary_phone != ''
+            )
+          )
+        ))
       )`);
-      values.push(filters.company);
+      values.push(filters.company, filters.company);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -2764,7 +4598,7 @@ export class DatabaseService {
     let rawRowData = {};
     try {
       if (r.raw_row_json) rawRowData = JSON.parse(r.raw_row_json);
-    } catch {}
+    } catch { }
 
     return {
       id: r.id,
@@ -4299,9 +6133,9 @@ export class DatabaseService {
             if (existingApp.job_id && a.job_id && existingApp.job_id === a.job_id && existingApp.date_applied === appDate) return true;
             // If same specific job title and same applied date and same source file
             if (existingApp.job_title && jobRole &&
-                existingApp.job_title.trim().toLowerCase() === jobRole.toLowerCase() &&
-                existingApp.date_applied === appDate &&
-                existingApp.source_file === a.source_file) {
+              existingApp.job_title.trim().toLowerCase() === jobRole.toLowerCase() &&
+              existingApp.date_applied === appDate &&
+              existingApp.source_file === a.source_file) {
               return true;
             }
             return false;
@@ -4685,8 +6519,12 @@ export class DatabaseService {
     }
 
     if (opts.gender && opts.gender !== 'All') {
-      conditions.push('p.gender = ?');
-      values.push(opts.gender);
+      if (opts.gender.toUpperCase() === 'UNSPECIFIED') {
+        conditions.push("(p.gender IS NULL OR p.gender = '' OR UPPER(p.gender) = 'UNSPECIFIED')");
+      } else {
+        conditions.push("UPPER(p.gender) = UPPER(?)");
+        values.push(opts.gender);
+      }
     }
 
     if (opts.search && typeof opts.search === 'string' && opts.search.trim()) {
@@ -4906,7 +6744,7 @@ export class DatabaseService {
       const cF2 = (c.feedback_2 || '').trim().toLowerCase();
       const cRaw = (c.raw_feedback || c.notes || '').trim().toLowerCase();
       const cKey = `${cDate}:::${cRec}:::${cF1}:::${cF2}:::${cRaw}`;
-      
+
       const personSeen = seenContactKeysByPerson.get(c.person_id)!;
       if (personSeen.has(cKey)) continue;
       personSeen.add(cKey);
@@ -4989,7 +6827,7 @@ export class DatabaseService {
         if (p.unclassified_links) {
           unclassLinks = typeof p.unclassified_links === 'string' ? JSON.parse(p.unclassified_links) : p.unclassified_links;
         }
-      } catch {}
+      } catch { }
 
       return {
         id: p.id,
@@ -5164,8 +7002,8 @@ export class DatabaseService {
     const activeAssign = assignments.find(a => a.status === 'Current') || assignments[0];
     const authoritativeOwner = activeAssign ? activeAssign.recruiter_name : (p.current_owner || 'Unassigned');
 
-    const firstAssigned = [...assignments].sort((a,b) => (a.assigned_date || '').localeCompare(b.assigned_date || ''))[0]?.recruiter_name || p.first_assigned_recruiter || authoritativeOwner;
-    const firstContacted = [...contacts].sort((a,b) => (a.contact_date || '').localeCompare(b.contact_date || ''))[0]?.recruiter_name || p.first_confirmed_contacted_by || null;
+    const firstAssigned = [...assignments].sort((a, b) => (a.assigned_date || '').localeCompare(b.assigned_date || ''))[0]?.recruiter_name || p.first_assigned_recruiter || authoritativeOwner;
+    const firstContacted = [...contacts].sort((a, b) => (a.contact_date || '').localeCompare(b.contact_date || ''))[0]?.recruiter_name || p.first_confirmed_contacted_by || null;
     const lastContacted = contacts[0]?.recruiter_name || p.last_contacted_by || null;
     const latestOutcome = contacts[0]?.outcome || p.latest_contact_outcome || null;
     const lastAssignDate = activeAssign?.assigned_date || p.last_assignment_date || p.recruiter_assigned_date || null;
@@ -5176,7 +7014,7 @@ export class DatabaseService {
       if (p.unclassified_links) {
         unclassLinks = typeof p.unclassified_links === 'string' ? JSON.parse(p.unclassified_links) : p.unclassified_links;
       }
-    } catch {}
+    } catch { }
 
     return {
       id: p.id,
@@ -5310,7 +7148,7 @@ export class DatabaseService {
 
       this.db.exec('COMMIT');
     } catch (err) {
-      try { this.db.exec('ROLLBACK'); } catch {}
+      try { this.db.exec('ROLLBACK'); } catch { }
       throw err;
     }
 
@@ -5371,7 +7209,7 @@ export class DatabaseService {
 
       this.db.exec('COMMIT');
     } catch (err) {
-      try { this.db.exec('ROLLBACK'); } catch {}
+      try { this.db.exec('ROLLBACK'); } catch { }
       throw err;
     }
 
@@ -5404,7 +7242,7 @@ export class DatabaseService {
             updates.reason || 'Status updated by recruiter',
             now
           );
-        } catch {}
+        } catch { }
       }
     }
 
@@ -5416,6 +7254,10 @@ export class DatabaseService {
     if (updates.gender !== undefined && updates.gender !== null) {
       setClauses.push('gender = ?');
       values.push(updates.gender);
+      try {
+        const normGender = String(updates.gender).toUpperCase().trim();
+        this.db.prepare('UPDATE applicants SET gender = ? WHERE master_person_id = ? OR (company = ? AND email = ?)').run(normGender, person.id, person.company, person.primary_email);
+      } catch { }
     }
 
     if (updates.full_name !== undefined && updates.full_name !== null) {
@@ -5558,6 +7400,7 @@ export class DatabaseService {
 
   getMasterCandidateStats(company?: string): {
     totalCandidates: number;
+    totalPeople: number;
     linkedApplications: number;
     incompleteCount: number;
     totalLinkedApplications: number;
@@ -5581,6 +7424,7 @@ export class DatabaseService {
     const linkedApps = appRow?.c || 0;
     return {
       totalCandidates: candRow?.c || 0,
+      totalPeople: candRow?.c || 0,
       linkedApplications: linkedApps,
       totalLinkedApplications: linkedApps,
       incompleteCount: incRow?.c || 0,
@@ -5591,39 +7435,32 @@ export class DatabaseService {
     };
   }
 
-  clearAllMasterData(company: 'AaraTech' | 'ClinisolTech' | 'all' = 'all', user = 'Recruiter Admin') {
+  clearAllMasterData(company: 'AaraTech' | 'ClinisolTech', user = 'Recruiter Admin') {
+    if (!company || (company !== 'AaraTech' && company !== 'ClinisolTech')) {
+      throw new Error(`Strict Company Isolation Violation: Company must be explicitly 'AaraTech' or 'ClinisolTech' (received: ${company}). Global multi-company wipe is strictly forbidden.`);
+    }
+
     this.db.exec('BEGIN TRANSACTION');
     try {
-      if (company === 'all') {
-        this.db.prepare('DELETE FROM master_recruiter_contacts').run();
-        this.db.prepare('DELETE FROM master_recruiter_assignments').run();
-        this.db.prepare('DELETE FROM master_possible_matches').run();
-        this.db.prepare('DELETE FROM master_status_history').run();
-        this.db.prepare('DELETE FROM master_applications').run();
-        this.db.prepare('DELETE FROM master_person_emails').run();
-        this.db.prepare('DELETE FROM master_person_phones').run();
-        this.db.prepare('DELETE FROM incomplete_records').run();
-        this.db.prepare('DELETE FROM master_transfers').run();
-        this.db.prepare("UPDATE applicants SET transfer_status = 'Not Transferred', transferred_at = NULL, master_person_id = NULL").run();
-        this.db.prepare('DELETE FROM master_people').run();
-      } else {
-        // Strict Company Isolation (Section 2): Delete ONLY records for the selected company.
-        // Other companies (e.g. ClinisolTech when clearing AaraTech) remain 100% untouched and preserved!
-        this.db.prepare('DELETE FROM master_recruiter_contacts WHERE person_id IN (SELECT id FROM master_people WHERE company = ?)').run(company);
-        this.db.prepare('DELETE FROM master_recruiter_assignments WHERE person_id IN (SELECT id FROM master_people WHERE company = ?)').run(company);
-        this.db.prepare('DELETE FROM master_possible_matches WHERE company = ?').run(company);
-        this.db.prepare('DELETE FROM master_status_history WHERE person_id IN (SELECT id FROM master_people WHERE company = ?)').run(company);
-        this.db.prepare('DELETE FROM master_applications WHERE company = ? OR person_id IN (SELECT id FROM master_people WHERE company = ?)').run(company, company);
-        this.db.prepare('DELETE FROM master_person_emails WHERE person_id IN (SELECT id FROM master_people WHERE company = ?)').run(company);
-        this.db.prepare('DELETE FROM master_person_phones WHERE person_id IN (SELECT id FROM master_people WHERE company = ?)').run(company);
-        this.db.prepare('DELETE FROM incomplete_records WHERE company = ?').run(company);
-        this.db.prepare('DELETE FROM master_transfers WHERE company = ?').run(company);
-        this.db.prepare("UPDATE applicants SET transfer_status = 'Not Transferred', transferred_at = NULL, master_person_id = NULL WHERE company = ?").run(company);
-        this.db.prepare('DELETE FROM master_people WHERE company = ?').run(company);
-      }
+      // Strict Company Isolation: Delete ONLY records for the selected company.
+      // The other company (e.g. ClinisolTech when clearing AaraTech) remains 100% UNTOUCHED and preserved!
+      this.db.prepare('DELETE FROM master_recruiter_contacts WHERE person_id IN (SELECT id FROM master_people WHERE LOWER(company) = LOWER(?))').run(company);
+      this.db.prepare('DELETE FROM master_recruiter_assignments WHERE person_id IN (SELECT id FROM master_people WHERE LOWER(company) = LOWER(?))').run(company);
+      this.db.prepare('DELETE FROM master_possible_matches WHERE LOWER(company) = LOWER(?)').run(company);
+      this.db.prepare('DELETE FROM master_status_history WHERE person_id IN (SELECT id FROM master_people WHERE LOWER(company) = LOWER(?))').run(company);
+      this.db.prepare('DELETE FROM master_applications WHERE LOWER(company) = LOWER(?) OR person_id IN (SELECT id FROM master_people WHERE LOWER(company) = LOWER(?))').run(company, company);
+      this.db.prepare('DELETE FROM master_person_emails WHERE person_id IN (SELECT id FROM master_people WHERE LOWER(company) = LOWER(?))').run(company);
+      this.db.prepare('DELETE FROM master_person_phones WHERE person_id IN (SELECT id FROM master_people WHERE LOWER(company) = LOWER(?))').run(company);
+      this.db.prepare('DELETE FROM incomplete_records WHERE LOWER(company) = LOWER(?)').run(company);
+      this.db.prepare('DELETE FROM master_transfers WHERE LOWER(company) = LOWER(?)').run(company);
+      this.db.prepare('DELETE FROM master_import_batches WHERE job_id IN (SELECT id FROM master_import_jobs WHERE LOWER(company) = LOWER(?))').run(company);
+      this.db.prepare('DELETE FROM master_import_jobs WHERE LOWER(company) = LOWER(?)').run(company);
+      this.db.prepare('DELETE FROM master_import_ledger WHERE LOWER(company) = LOWER(?)').run(company);
+      this.db.prepare("UPDATE applicants SET transfer_status = 'Not Transferred', transferred_at = NULL, master_person_id = NULL WHERE LOWER(company) = LOWER(?)").run(company);
+      this.db.prepare('DELETE FROM master_people WHERE LOWER(company) = LOWER(?)').run(company);
       this.db.exec('COMMIT');
     } catch (err) {
-      try { this.db.exec('ROLLBACK'); } catch {}
+      try { this.db.exec('ROLLBACK'); } catch { }
       throw err;
     }
 
@@ -5643,8 +7480,166 @@ export class DatabaseService {
     };
   }
 
-  upsertMasterCandidatesBatch(people: any[], importRecord?: any): { success: boolean; count: number; upserted?: number; peopleIds?: string[] } {
-    if (!people || people.length === 0) return { success: true, count: 0, upserted: 0, peopleIds: [] };
+  runInTransactionWithRetry<T>(fn: () => T, maxRetries = 5, initialDelayMs = 50): T {
+    let attempt = 0;
+    while (attempt < maxRetries) {
+      attempt++;
+      try {
+        this.db.exec('BEGIN IMMEDIATE TRANSACTION');
+        try {
+          const result = fn();
+          this.db.exec('COMMIT');
+          return result;
+        } catch (innerErr) {
+          try { this.db.exec('ROLLBACK'); } catch { }
+          throw innerErr;
+        }
+      } catch (err: any) {
+        const msg = String(err?.message || '').toLowerCase();
+        const isBusyOrLocked = err?.code === 'ERR_SQLITE_ERROR' && (
+          err?.errcode === 5 ||
+          err?.errcode === 261 ||
+          msg.includes('locked') ||
+          msg.includes('busy')
+        );
+        if (isBusyOrLocked && attempt < maxRetries) {
+          const backoff = initialDelayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 20);
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, backoff);
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error('Transaction failed after maximum retries');
+  }
+
+  isCompatibleCandidateName(nameA?: string | null, nameB?: string | null): boolean {
+    if (!nameA || !nameB) return true;
+    const a = nameA.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '');
+    const b = nameB.trim().toLowerCase().replace(/[^a-z0-9\s]/g, '');
+    if (!a || !b) return true;
+    if (a === b) return true;
+    if (a.includes(b) || b.includes(a)) return true;
+    const tokensA = a.split(/\s+/).filter(t => t.length > 1);
+    const tokensB = b.split(/\s+/).filter(t => t.length > 1);
+    const shared = tokensA.filter(t => tokensB.includes(t));
+    if (shared.length > 0) return true;
+    const placeholders = ['candidate', 'unknown', 'yes', 'no', 'na', 'n/a', 'none'];
+    if (placeholders.includes(a) || placeholders.includes(b)) return true;
+    return false;
+  }
+
+  createMasterImportJob(job: { id: string; company: string; sourceFile?: string; sheetName?: string; totalRows?: number }): any {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      INSERT INTO master_import_jobs (
+        id, company, source_file, sheet_name, total_rows, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'Processing', ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        company = excluded.company,
+        source_file = COALESCE(excluded.source_file, master_import_jobs.source_file),
+        sheet_name = COALESCE(excluded.sheet_name, master_import_jobs.sheet_name),
+        total_rows = excluded.total_rows,
+        status = 'Processing',
+        updated_at = excluded.updated_at
+    `).run(job.id, job.company, job.sourceFile || null, job.sheetName || 'Sheet1', job.totalRows || 0, now, now);
+    return this.getMasterImportJob(job.id);
+  }
+
+  getMasterImportJob(jobId: string): any {
+    const job = this.db.prepare('SELECT * FROM master_import_jobs WHERE id = ?').get(jobId) as any;
+    if (!job) return null;
+    const batches = this.db.prepare('SELECT * FROM master_import_batches WHERE job_id = ? ORDER BY batch_number ASC').all(jobId);
+    return { ...job, batches };
+  }
+
+  updateMasterImportJob(jobId: string, updates: any): any {
+    const existing = this.getMasterImportJob(jobId);
+    if (!existing) return null;
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE master_import_jobs SET
+        processed_rows = COALESCE(?, processed_rows),
+        successful_rows = COALESCE(?, successful_rows),
+        failed_rows = COALESCE(?, failed_rows),
+        new_candidates = COALESCE(?, new_candidates),
+        matched_candidates = COALESCE(?, matched_candidates),
+        new_applications = COALESCE(?, new_applications),
+        matched_applications = COALESCE(?, matched_applications),
+        duplicate_applications = COALESCE(?, duplicate_applications),
+        status = COALESCE(?, status),
+        error_summary = COALESCE(?, error_summary),
+        completed_at = COALESCE(?, completed_at),
+        updated_at = ?
+      WHERE id = ?
+    `).run(
+      updates.processed_rows !== undefined ? updates.processed_rows : null,
+      updates.successful_rows !== undefined ? updates.successful_rows : null,
+      updates.failed_rows !== undefined ? updates.failed_rows : null,
+      updates.new_candidates !== undefined ? updates.new_candidates : null,
+      updates.matched_candidates !== undefined ? updates.matched_candidates : null,
+      updates.new_applications !== undefined ? updates.new_applications : null,
+      updates.matched_applications !== undefined ? updates.matched_applications : null,
+      updates.duplicate_applications !== undefined ? updates.duplicate_applications : null,
+      updates.status || null,
+      updates.error_summary || null,
+      updates.completed_at || null,
+      now,
+      jobId
+    );
+    return this.getMasterImportJob(jobId);
+  }
+
+  getMasterImportJobs(company?: string): any[] {
+    if (company) {
+      return this.db.prepare('SELECT * FROM master_import_jobs WHERE company = ? ORDER BY created_at DESC').all(company);
+    }
+    return this.db.prepare('SELECT * FROM master_import_jobs ORDER BY created_at DESC').all();
+  }
+
+  getMasterImportResumeInfo(jobId: string): any {
+    const job = this.db.prepare('SELECT * FROM master_import_jobs WHERE id = ?').get(jobId) as any;
+    if (!job) return null;
+    const batches = this.db.prepare('SELECT * FROM master_import_batches WHERE job_id = ? AND status = ? ORDER BY batch_number ASC').all(jobId, 'Completed') as any[];
+    const maxRowResult = this.db.prepare('SELECT MAX(end_row) as max_row FROM master_import_batches WHERE job_id = ? AND status = ?').get(jobId, 'Completed') as any;
+    const maxRow = maxRowResult?.max_row || 0;
+    return {
+      jobId: job.id,
+      company: job.company,
+      totalRows: job.total_rows,
+      processedRows: job.processed_rows,
+      successfulRows: job.successful_rows,
+      failedRows: job.failed_rows,
+      status: job.status,
+      completedBatches: batches.map(b => b.batch_number),
+      maxCompletedRow: maxRow,
+      nextPendingRow: maxRow + 1,
+    };
+  }
+
+  getMasterImportErrors(jobId: string): any[] {
+    return this.db.prepare("SELECT * FROM master_import_ledger WHERE job_id = ? AND status = 'Failed' ORDER BY row_number ASC").all(jobId);
+  }
+
+  completeMasterImportJob(jobId: string, status = 'Completed', errorSummary?: string): any {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE master_import_jobs SET
+        status = ?,
+        error_summary = COALESCE(?, error_summary),
+        completed_at = ?,
+        updated_at = ?
+      WHERE id = ?
+    `).run(status, errorSummary || null, now, now, jobId);
+    return this.getMasterImportJob(jobId);
+  }
+
+  upsertMasterCandidatesBatch(
+    people: any[],
+    importRecord?: any,
+    options?: { jobId?: string; batchNumber?: number; startRow?: number; endRow?: number }
+  ): { success: boolean; count: number; upserted?: number; failed?: number; errors?: any[]; peopleIds?: string[] } {
+    if (!people || people.length === 0) return { success: true, count: 0, upserted: 0, failed: 0, errors: [], peopleIds: [] };
 
     const insertPersonStmt = this.db.prepare(`
       INSERT INTO master_people (
@@ -5701,10 +7696,10 @@ export class DatabaseService {
 
     const insertAppStmt = this.db.prepare(`
       INSERT INTO master_applications (
-        id, person_id, applicant_id, company, job_id, job_title, date_applied,
+        id, person_id, applicant_id, company, job_id, job_title, normalized_role, source_row_number, date_applied,
         application_collected_date, recruiter_assigned_date, green_card, h1b_status,
         current_stage, effective_result, source_file, resume_link, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         resume_link = COALESCE(excluded.resume_link, master_applications.resume_link),
         application_collected_date = COALESCE(excluded.application_collected_date, master_applications.application_collected_date),
@@ -5715,7 +7710,7 @@ export class DatabaseService {
     `);
 
     const findExistingAppStmt = this.db.prepare(`
-      SELECT id, resume_link, current_stage, application_collected_date, recruiter_assigned_date, green_card, h1b_status
+      SELECT id, resume_link, current_stage, application_collected_date, recruiter_assigned_date, green_card, h1b_status, date_applied
       FROM master_applications 
       WHERE (person_id = ? OR person_id = ?) AND company = ? 
         AND LOWER(REPLACE(REPLACE(REPLACE(job_title, ' ', ''), '-', ''), '_', '')) = LOWER(REPLACE(REPLACE(REPLACE(?, ' ', ''), '-', ''), '_', ''))
@@ -5755,300 +7750,544 @@ export class DatabaseService {
       WHERE (person_id = ? OR person_id = ?) AND LOWER(recruiter_name) = LOWER(?) AND assigned_date = ?
     `);
 
-    const peopleIds: string[] = [];
+    const insertLedgerStmt = this.db.prepare(`
+      INSERT INTO master_import_ledger (
+        id, job_id, import_id, source_file, sheet_name, row_number, company,
+        normalized_identity, raw_name, raw_email, raw_phone, raw_role,
+        status, person_id, application_id, error_details, processed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(company, source_file, sheet_name, row_number) DO UPDATE SET
+        job_id = COALESCE(excluded.job_id, master_import_ledger.job_id),
+        status = excluded.status,
+        person_id = excluded.person_id,
+        application_id = excluded.application_id,
+        error_details = excluded.error_details,
+        processed_at = excluded.processed_at
+    `);
 
-    this.db.exec('BEGIN TRANSACTION');
-    try {
+    return this.runInTransactionWithRetry(() => {
+      // Pre-load in-memory index ONCE before the loop for blazing-fast O(1) candidate resolution:
+      const allExisting = this.db.prepare('SELECT id, person_id, full_name, company, primary_email, primary_phone FROM master_people').all() as any[];
+      const emailMap = new Map<string, any>();
+      const phoneMap = new Map<string, any>();
+      const existingPersonIds = new Set<string>();
+      const personIdToIdMap = new Map<string, string>();
+      const idMap = new Map<string, any>();
+      for (const row of allExisting) {
+        if (row.id) idMap.set(row.id, row);
+        if (row.person_id) {
+          existingPersonIds.add(row.person_id);
+          personIdToIdMap.set(row.person_id, row.id);
+        }
+        if (row.primary_email) emailMap.set(`${row.company}:${row.primary_email.trim().toLowerCase()}`, row);
+        if (row.primary_phone) {
+          const d = row.primary_phone.replace(/\D/g, '');
+          if (d.length >= 7) phoneMap.set(`${row.company}:${d.slice(-10)}`, row);
+        }
+      }
+
+      // Pre-calculate next Person ID counter ONCE based on all existing P- IDs:
+      let nextNum = 1;
+      for (const pid of existingPersonIds) {
+        const match = pid.match(/P-(\d+)/);
+        if (match) {
+          const n = parseInt(match[1], 10);
+          if (n >= nextNum) nextNum = n + 1;
+        }
+      }
+
+      let upsertedCount = 0;
+      let failedCount = 0;
+      let newCandidatesCount = 0;
+      let matchedCandidatesCount = 0;
+      let newApplicationsCount = 0;
+      let duplicateApplicationsCount = 0;
+      const rowErrors: any[] = [];
+      const peopleIds: string[] = [];
+
+      // Ensure master_import_jobs parent record exists before batch insertion to avoid FOREIGN KEY failure
+      const defaultComp = people[0]?.company || (people[0]?.current_company === 'ClinisolTech' ? 'ClinisolTech' : 'AaraTech');
+      let jobInfo: any = null;
+      if (options?.jobId) {
+        jobInfo = this.db.prepare('SELECT id, source_file, sheet_name FROM master_import_jobs WHERE id = ?').get(options.jobId);
+        if (!jobInfo) {
+          const nowIso = new Date().toISOString();
+          this.db.prepare(`
+            INSERT INTO master_import_jobs (
+              id, company, source_file, sheet_name, total_rows, status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 'Processing', ?, ?)
+          `).run(
+            options.jobId,
+            defaultComp,
+            importRecord?.file_name || (options as any)?.sourceFile || 'pasted_leads.xlsx',
+            importRecord?.sheet_name || (options as any)?.sheetName || 'Pasted_Leads',
+            options.endRow || people.length,
+            nowIso,
+            nowIso
+          );
+          jobInfo = {
+            id: options.jobId,
+            source_file: importRecord?.file_name || (options as any)?.sourceFile || 'pasted_leads.xlsx',
+            sheet_name: importRecord?.sheet_name || (options as any)?.sheetName || 'Pasted_Leads'
+          };
+        }
+      }
+
       for (const p of people) {
         const comp = p.company || (p.current_company === 'ClinisolTech' ? 'ClinisolTech' : 'AaraTech');
         const now = p.created_at || new Date().toISOString();
+        const startOffset = options?.startRow ? (options.startRow - 1) : 0;
+        const srcRow = p.source_row || p.source_row_number || (p.applications && p.applications[0]?.source_row) || (startOffset + people.indexOf(p) + 1);
+        const impId = (importRecord && importRecord.id) || p.source_import_id || options?.jobId || 'manual-import';
+        const jobId = options?.jobId || null;
+        const srcFile = (importRecord && importRecord.file_name) || (options as any)?.sourceFile || jobInfo?.source_file || (p.applications && p.applications[0]?.source_file) || p.source_file || 'pasted_leads.xlsx';
+        const srcSheet = (importRecord && importRecord.sheet_name) || (options as any)?.sheetName || jobInfo?.sheet_name || (p.applications && p.applications[0]?.source_sheet) || p.source_sheet || 'Pasted_Leads';
+        const normIdent = p.primary_email ? p.primary_email.trim().toLowerCase() : (p.primary_phone ? p.primary_phone.replace(/\D/g, '').slice(-10) : (p.full_name || `row-${srcRow}`));
 
-        // 1. Resolve or generate candidate ID and person_id
-        if (!p.id || !p.person_id) {
+        this.db.exec('SAVEPOINT row_sp');
+        try {
+          // 1. Resolve or generate candidate ID and person_id
           let existingCandidate: any = null;
-          if (p.primary_email) {
-            existingCandidate = this.db.prepare('SELECT id, person_id FROM master_people WHERE company = ? AND LOWER(primary_email) = LOWER(?)').get(comp, p.primary_email.trim());
+          if (p.id && idMap.has(p.id)) {
+            existingCandidate = idMap.get(p.id);
+          }
+          if (!existingCandidate && p.primary_email) {
+            existingCandidate = emailMap.get(`${comp}:${p.primary_email.trim().toLowerCase()}`);
           }
           if (!existingCandidate && p.primary_phone) {
             const digits = p.primary_phone.replace(/\D/g, '');
-            if (digits) {
-              const allCand = this.db.prepare('SELECT id, person_id, primary_phone FROM master_people WHERE company = ? AND primary_phone IS NOT NULL').all(comp) as any[];
-              existingCandidate = allCand.find(c => (c.primary_phone || '').replace(/\D/g, '') === digits || (c.primary_phone || '').replace(/\D/g, '').endsWith(digits) || digits.endsWith((c.primary_phone || '').replace(/\D/g, '')));
+            if (digits.length >= 7) {
+              const phoneMatch = phoneMap.get(`${comp}:${digits.slice(-10)}`);
+              // Safe Duplicate Identity Matching: Only match on phone if candidate names are compatible
+              if (phoneMatch && this.isCompatibleCandidateName(p.full_name, phoneMatch.full_name)) {
+                existingCandidate = phoneMatch;
+              }
             }
           }
 
           if (existingCandidate) {
             p.id = existingCandidate.id;
             p.person_id = existingCandidate.person_id;
+            matchedCandidatesCount++;
           } else {
             p.id = p.id || `mp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-            if (!p.person_id) {
-              const maxRow = this.db.prepare("SELECT person_id FROM master_people WHERE person_id LIKE 'P-%' ORDER BY person_id DESC LIMIT 1").get() as any;
-              let nextNum = 1;
-              if (maxRow && maxRow.person_id) {
-                const match = maxRow.person_id.match(/P-(\d+)/);
-                if (match) nextNum = parseInt(match[1], 10) + 1;
+
+            // Check if p.person_id is missing, or is already taken by a DIFFERENT candidate in master_people
+            const isTakenByAnother = p.person_id && personIdToIdMap.has(p.person_id) && personIdToIdMap.get(p.person_id) !== p.id;
+            if (!p.person_id || isTakenByAnother || existingPersonIds.has(p.person_id)) {
+              while (existingPersonIds.has(`P-${nextNum.toString().padStart(6, '0')}`)) {
+                nextNum++;
               }
-              p.person_id = `P-${nextNum.toString().padStart(6, '0')}`;
+              p.person_id = `P-${(nextNum++).toString().padStart(6, '0')}`;
             }
+
+            existingPersonIds.add(p.person_id);
+            personIdToIdMap.set(p.person_id, p.id);
+            idMap.set(p.id, { id: p.id, person_id: p.person_id, full_name: p.full_name, company: comp });
+            if (p.primary_email) emailMap.set(`${comp}:${p.primary_email.trim().toLowerCase()}`, { id: p.id, person_id: p.person_id, full_name: p.full_name });
+            if (p.primary_phone) {
+              const d = p.primary_phone.replace(/\D/g, '');
+              if (d.length >= 7) phoneMap.set(`${comp}:${d.slice(-10)}`, { id: p.id, person_id: p.person_id, full_name: p.full_name });
+            }
+            newCandidatesCount++;
           }
-        }
 
-        peopleIds.push(p.id);
+          peopleIds.push(p.id);
 
-        // 2. Synthesize applications if flat candidate object passed
-        if (!Array.isArray(p.applications) && (p.job_title || p.current_title)) {
-          p.applications = [{
-            job_title: p.job_title || p.current_title,
-            company: comp,
-            resume_link: p.resume_url || null,
-            application_collected_date: p.application_collected_date || null,
-            recruiter_assigned_date: p.recruiter_assigned_date || null,
-            green_card: p.green_card || null,
-            h1b_status: p.h1b_status || null,
-            source_file: p.source_file || null,
-            source_row: p.source_row || null,
-          }];
-        }
-
-        if (!Array.isArray(p.emails) && p.primary_email) {
-          p.emails = [{ email: p.primary_email, is_primary: true }];
-        }
-
-        if (!Array.isArray(p.phones) && p.primary_phone) {
-          p.phones = [{ phone_original: p.primary_phone, phone_normalized: p.primary_phone.replace(/\D/g, ''), is_primary: true }];
-        }
-
-        if (p.recruiter && (!p.current_owner || p.current_owner === 'Unassigned')) {
-          p.current_owner = p.recruiter;
-        }
-
-        if (!Array.isArray(p.recruiter_contacts) && (p.feedback_1 || p.feedback_2 || p.notes)) {
-          const notesText = [p.feedback_1, p.feedback_2, p.notes].filter(Boolean).join(' - ');
-          p.recruiter_contacts = [{
-            recruiter_name: p.recruiter || p.current_owner || 'Recruiter',
-            contact_type: 'Phone',
-            contact_method: 'Phone',
-            outcome: p.feedback_1 || 'Logged',
-            feedback_1: p.feedback_1 || null,
-            feedback_2: p.feedback_2 || null,
-            notes: notesText,
-            raw_feedback: notesText,
-            contact_date: p.recruiter_assigned_date || now.split('T')[0],
-            source_file: p.source_file || null,
-          }];
-        }
-
-        insertPersonStmt.run(
-          p.id,
-          p.person_id,
-          p.first_name || null,
-          p.last_name || null,
-          p.full_name,
-          p.gender || 'Unspecified',
-          p.primary_email || null,
-          p.secondary_email || null,
-          p.primary_phone || null,
-          p.secondary_phone || null,
-          p.location || null,
-          p.zip_code || null,
-          p.headline || null,
-          p.current_title || null,
-          comp,
-          p.linkedin_url || null,
-          p.resume_url || null,
-          p.unclassified_links ? JSON.stringify(p.unclassified_links) : null,
-          p.current_status || 'New',
-          p.current_owner || 'Unassigned',
-          comp,
-          p.green_card || null,
-          p.h1b_status || null,
-          p.application_collected_date || null,
-          p.recruiter_assigned_date || null,
-          p.first_assigned_recruiter || null,
-          p.last_contacted_by || null,
-          p.latest_contact_outcome || null,
-          p.last_assignment_date || null,
-          p.last_contact_date || null,
-          now,
-          p.updated_at || now,
-          p.last_activity_at || now
-        );
-
-        if (Array.isArray(p.emails)) {
-          for (const e of p.emails) {
-            const emailStr = typeof e === 'string' ? e : e.email;
-            if (!emailStr) continue;
-            const normEmail = typeof e === 'string' ? e.toLowerCase() : (e.normalized_email || e.email?.toLowerCase() || '');
-            insertEmailStmt.run(
-              (typeof e === 'object' && e.id) || `${p.id}-em-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-              p.id,
-              emailStr,
-              normEmail,
-              (typeof e === 'object' && e.is_primary) ? 1 : 0,
-              (typeof e === 'object' && e.source) || 'Import',
-              (typeof e === 'object' && e.first_seen_at) || now,
-              (typeof e === 'object' && e.last_seen_at) || now,
-              (typeof e === 'object' && e.created_at) || now
-            );
+          // 2. Synthesize applications if flat candidate object passed
+          if (!Array.isArray(p.applications) && (p.job_title || p.current_title)) {
+            p.applications = [{
+              job_title: p.job_title || p.current_title,
+              company: comp,
+              resume_link: p.resume_url || null,
+              application_collected_date: p.application_collected_date || null,
+              recruiter_assigned_date: p.recruiter_assigned_date || null,
+              green_card: p.green_card || null,
+              h1b_status: p.h1b_status || null,
+              source_file: p.source_file || null,
+              source_row: srcRow,
+              date_applied: p.date_applied || null,
+            }];
           }
-        }
 
-        if (Array.isArray(p.phones)) {
-          for (const ph of p.phones) {
-            const rawPhone = typeof ph === 'string' ? ph : (ph.phone_original || ph.phone);
-            if (!rawPhone) continue;
-            const normPhone = typeof ph === 'string' ? ph.replace(/\D/g, '') : (ph.phone_normalized || ph.phone?.replace(/\D/g, '') || '');
-            insertPhoneStmt.run(
-              (typeof ph === 'object' && ph.id) || `${p.id}-ph-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-              p.id,
-              rawPhone,
-              normPhone,
-              (typeof ph === 'object' && ph.is_primary) ? 1 : 0,
-              (typeof ph === 'object' && ph.source) || 'Import',
-              (typeof ph === 'object' && ph.first_seen_at) || now,
-              (typeof ph === 'object' && ph.last_seen_at) || now,
-              (typeof ph === 'object' && ph.created_at) || now
-            );
+          if (!Array.isArray(p.emails) && p.primary_email) {
+            p.emails = [{ email: p.primary_email, is_primary: true }];
           }
-        }
 
-        if (Array.isArray(p.applications)) {
-          for (const app of p.applications) {
-            const appRole = app.job_title || 'General Applicant';
-            const appComp = app.company || comp;
-            let existing: any = null;
-            if (app.id) {
-              existing = this.db.prepare('SELECT id, resume_link, current_stage, application_collected_date, recruiter_assigned_date, green_card, h1b_status FROM master_applications WHERE id = ?').get(app.id);
-            }
-            if (!existing) {
-              existing = findExistingAppStmt.get(p.id, p.person_id, appComp, appRole) as any;
-            }
-            if (!existing) {
-              // If candidate already has an application in this company, consolidate into it to prevent duplicate applications
-              const allCandApps = this.db.prepare('SELECT id, resume_link, current_stage, application_collected_date, recruiter_assigned_date, green_card, h1b_status FROM master_applications WHERE (person_id = ? OR person_id = ?) AND company = ?').all(p.id, p.person_id, appComp) as any[];
-              if (allCandApps.length === 1) {
-                existing = allCandApps[0];
-              }
-            }
+          if (!Array.isArray(p.phones) && p.primary_phone) {
+            p.phones = [{ phone_original: p.primary_phone, phone_normalized: p.primary_phone.replace(/\D/g, ''), is_primary: true }];
+          }
 
-            const resLink = app.resume_link || app.resume_url || p.resume_url || null;
-            const stage = app.current_stage || null;
-            const appColDate = app.application_collected_date || p.application_collected_date || null;
-            const recAssignDate = app.recruiter_assigned_date || p.recruiter_assigned_date || null;
-            const gcVal = app.green_card || p.green_card || null;
-            const h1bVal = app.h1b_status || p.h1b_status || null;
+          if (p.recruiter && (!p.current_owner || p.current_owner === 'Unassigned')) {
+            p.current_owner = p.recruiter;
+          }
 
-            if (existing) {
-              updateExistingAppStmt.run(
-                resLink,
-                stage, stage, stage,
-                appColDate,
-                recAssignDate,
-                gcVal,
-                h1bVal,
-                existing.id
-              );
-            } else {
-              insertAppStmt.run(
-                app.id || `${p.id}-app-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          if (!Array.isArray(p.recruiter_contacts) && (p.feedback_1 || p.feedback_2 || p.notes)) {
+            const notesText = [p.feedback_1, p.feedback_2, p.notes].filter(Boolean).join(' - ');
+            p.recruiter_contacts = [{
+              recruiter_name: p.recruiter || p.current_owner || 'Recruiter',
+              contact_type: 'Phone',
+              contact_method: 'Phone',
+              outcome: p.feedback_1 || 'Logged',
+              feedback_1: p.feedback_1 || null,
+              feedback_2: p.feedback_2 || null,
+              notes: notesText,
+              raw_feedback: notesText,
+              contact_date: p.recruiter_assigned_date || now.split('T')[0],
+              source_file: p.source_file || null,
+            }];
+          }
+
+          // Defensive fallback: full_name must NEVER violate NOT NULL constraint
+          const safeFullName = (p.full_name && p.full_name.trim()) ||
+            `${p.first_name || ''} ${p.last_name || ''}`.trim() ||
+            (p.primary_email ? p.primary_email.split('@')[0] : '') ||
+            'Candidate';
+
+          insertPersonStmt.run(
+            p.id,
+            p.person_id,
+            p.first_name || null,
+            p.last_name || null,
+            safeFullName,
+            p.gender || 'Unspecified',
+            p.primary_email || null,
+            p.secondary_email || null,
+            p.primary_phone || null,
+            p.secondary_phone || null,
+            p.location || null,
+            p.zip_code || null,
+            p.headline || null,
+            p.current_title || null,
+            comp,
+            p.linkedin_url || null,
+            p.resume_url || null,
+            p.unclassified_links ? JSON.stringify(p.unclassified_links) : null,
+            p.current_status || 'New',
+            p.current_owner || 'Unassigned',
+            comp,
+            p.green_card || null,
+            p.h1b_status || null,
+            p.application_collected_date || null,
+            p.recruiter_assigned_date || null,
+            p.first_assigned_recruiter || null,
+            p.last_contacted_by || null,
+            p.latest_contact_outcome || null,
+            p.last_assignment_date || null,
+            p.last_contact_date || null,
+            now,
+            p.updated_at || now,
+            p.last_activity_at || now
+          );
+
+          if (Array.isArray(p.emails)) {
+            for (const e of p.emails) {
+              const emailStr = typeof e === 'string' ? e : e.email;
+              if (!emailStr) continue;
+              const normEmail = typeof e === 'string' ? e.toLowerCase() : (e.normalized_email || e.email?.toLowerCase() || '');
+              insertEmailStmt.run(
+                (typeof e === 'object' && e.id) || `${p.id}-em-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
                 p.id,
-                app.applicant_id || null,
-                appComp,
-                app.job_id || null,
-                appRole,
-                app.date_applied || appColDate || recAssignDate || now.split('T')[0],
-                appColDate,
-                recAssignDate,
-                gcVal,
-                h1bVal,
-                stage || 'Applied',
-                app.effective_result || null,
-                app.source_file || null,
-                resLink,
-                app.created_at || now
+                emailStr,
+                normEmail,
+                (typeof e === 'object' && e.is_primary) ? 1 : 0,
+                (typeof e === 'object' && e.source) || 'Import',
+                (typeof e === 'object' && e.first_seen_at) || now,
+                (typeof e === 'object' && e.last_seen_at) || now,
+                (typeof e === 'object' && e.created_at) || now
               );
             }
           }
-        }
 
-        // Handle Assignments
-        if (Array.isArray(p.assignments) && p.assignments.length > 0) {
-          for (const asgn of p.assignments) {
-            const recName = asgn.recruiter_name || 'Recruiter';
-            const asgnDate = asgn.assigned_date || now.split('T')[0];
-            const existingAsgn = findExistingAssignmentStmt.get(p.id, p.person_id, recName, asgnDate) as any;
+          if (Array.isArray(p.phones)) {
+            for (const ph of p.phones) {
+              const rawPhone = typeof ph === 'string' ? ph : (ph.phone_original || ph.phone);
+              if (!rawPhone) continue;
+              const normPhone = typeof ph === 'string' ? ph.replace(/\D/g, '') : (ph.phone_normalized || ph.phone?.replace(/\D/g, '') || '');
+              insertPhoneStmt.run(
+                (typeof ph === 'object' && ph.id) || `${p.id}-ph-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                p.id,
+                rawPhone,
+                normPhone,
+                (typeof ph === 'object' && ph.is_primary) ? 1 : 0,
+                (typeof ph === 'object' && ph.source) || 'Import',
+                (typeof ph === 'object' && ph.first_seen_at) || now,
+                (typeof ph === 'object' && ph.last_seen_at) || now,
+                (typeof ph === 'object' && ph.created_at) || now
+              );
+            }
+          }
+
+          let primaryAppId: string | null = null;
+          if (Array.isArray(p.applications)) {
+            for (const app of p.applications) {
+              const appRole = app.job_title || p.current_title || p.headline || 'General Applicant';
+              const appComp = app.company || comp;
+              let existing: any = null;
+              if (app.id) {
+                existing = this.db.prepare('SELECT id, resume_link, current_stage, application_collected_date, recruiter_assigned_date, green_card, h1b_status FROM master_applications WHERE id = ?').get(app.id);
+              }
+              if (!existing) {
+                existing = findExistingAppStmt.get(p.id, p.person_id, appComp, appRole) as any;
+              }
+              // Strict Multi-Role Application Support:
+              // Distinct roles (Cybersecurity vs AWS vs DA) or distinct application dates are genuine separate application occurrences
+              if (existing && app.date_applied && existing.date_applied && app.date_applied !== existing.date_applied) {
+                existing = null;
+              }
+
+              const resLink = app.resume_link || app.resume_url || p.resume_url || null;
+              const stage = app.current_stage || null;
+              const appColDate = app.application_collected_date || p.application_collected_date || null;
+              const recAssignDate = app.recruiter_assigned_date || p.recruiter_assigned_date || null;
+              const gcVal = app.green_card || p.green_card || null;
+              const h1bVal = app.h1b_status || p.h1b_status || null;
+
+              if (existing) {
+                duplicateApplicationsCount++;
+                primaryAppId = existing.id;
+                updateExistingAppStmt.run(
+                  resLink,
+                  stage, stage, stage,
+                  appColDate,
+                  recAssignDate,
+                  gcVal,
+                  h1bVal,
+                  existing.id
+                );
+              } else {
+                newApplicationsCount++;
+                const newAppId = app.id || `${p.id}-app-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+                primaryAppId = newAppId;
+                insertAppStmt.run(
+                  newAppId,
+                  p.id,
+                  app.applicant_id || null,
+                  appComp,
+                  app.job_id || null,
+                  appRole,
+                  appRole,
+                  srcRow,
+                  app.date_applied || appColDate || recAssignDate || now.split('T')[0],
+                  appColDate,
+                  recAssignDate,
+                  gcVal,
+                  h1bVal,
+                  stage || 'Applied',
+                  app.effective_result || null,
+                  app.source_file || null,
+                  resLink,
+                  app.created_at || now
+                );
+              }
+            }
+          }
+
+          // Handle Assignments
+          if (Array.isArray(p.assignments) && p.assignments.length > 0) {
+            for (const asgn of p.assignments) {
+              const recName = asgn.recruiter_name || 'Recruiter';
+              const asgnDate = asgn.assigned_date || now.split('T')[0];
+              const existingAsgn = findExistingAssignmentStmt.get(p.id, p.person_id, recName, asgnDate) as any;
+              if (!existingAsgn) {
+                insertAssignmentStmt.run(
+                  asgn.id || `${p.id}-mra-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                  p.id,
+                  recName,
+                  asgnDate,
+                  asgn.status || 'Current',
+                  asgn.reassignment_reason || null,
+                  asgn.created_at || now,
+                  asgn.created_by || 'Import',
+                  asgn.application_id || primaryAppId || null,
+                  asgn.source_row || asgn.source_row_number || null,
+                  asgn.source_file || null
+                );
+              }
+            }
+          } else if (p.current_owner && p.current_owner !== 'Unassigned' && p.current_owner !== 'Adam') {
+            const asgnDate = p.recruiter_assigned_date || p.last_assignment_date || p.application_collected_date || now.split('T')[0];
+            const existingAsgn = findExistingAssignmentStmt.get(p.id, p.person_id, p.current_owner, asgnDate) as any;
             if (!existingAsgn) {
               insertAssignmentStmt.run(
-                asgn.id || `${p.id}-mra-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                `${p.id}-mra-init`,
                 p.id,
-                recName,
+                p.current_owner,
                 asgnDate,
-                asgn.status || 'Current',
-                asgn.reassignment_reason || null,
-                asgn.created_at || now,
-                asgn.created_by || 'Import',
-                asgn.application_id || null,
-                asgn.source_row || asgn.source_row_number || null,
-                asgn.source_file || null
+                'Current',
+                'Initial recruiter assignment',
+                now,
+                'Import',
+                primaryAppId || null,
+                p.source_row || p.source_row_number || null,
+                p.source_file || null
               );
             }
           }
-        } else if (p.current_owner && p.current_owner !== 'Unassigned' && p.current_owner !== 'Adam') {
-          const asgnDate = p.recruiter_assigned_date || p.last_assignment_date || p.application_collected_date || now.split('T')[0];
-          const existingAsgn = findExistingAssignmentStmt.get(p.id, p.person_id, p.current_owner, asgnDate) as any;
-          if (!existingAsgn) {
-            insertAssignmentStmt.run(
-              `${p.id}-mra-init`,
-              p.id,
-              p.current_owner,
-              asgnDate,
-              'Current',
-              'Initial recruiter assignment',
-              now,
-              'Import',
-              null,
-              p.source_row || p.source_row_number || null,
-              p.source_file || null
-            );
-          }
-        }
 
-        if (Array.isArray(p.recruiter_contacts)) {
-          for (const c of p.recruiter_contacts) {
-            const rawFb = c.original_feedback || c.raw_feedback || c.notes || null;
-            const recName = c.recruiter_name || 'Recruiter';
-            const existingContact = rawFb ? findExistingContactStmt.get(p.id, p.person_id, recName, rawFb, rawFb) as any : null;
-            if (!existingContact) {
-              insertContactStmt.run(
-                c.id || `${p.id}-rc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-                p.id,
-                recName,
-                c.contact_type || 'Phone',
-                c.notes || rawFb,
-                c.contact_date || now.split('T')[0],
-                c.created_at || now,
-                c.contact_method || c.contact_type || 'Phone',
-                c.outcome || null,
-                c.feedback_1 || null,
-                c.feedback_2 || null,
-                c.additional_feedback || null,
-                rawFb,
-                c.source_file || null,
-                c.application_id || null,
-                c.source_row || c.source_row_number || null
-              );
+          if (Array.isArray(p.recruiter_contacts)) {
+            for (const c of p.recruiter_contacts) {
+              const rawFb = c.original_feedback || c.raw_feedback || c.notes || null;
+              const recName = c.recruiter_name || 'Recruiter';
+              const existingContact = rawFb ? findExistingContactStmt.get(p.id, p.person_id, recName, rawFb, rawFb) as any : null;
+              if (!existingContact) {
+                insertContactStmt.run(
+                  c.id || `${p.id}-rc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+                  p.id,
+                  recName,
+                  c.contact_type || 'Phone',
+                  c.notes || rawFb,
+                  c.contact_date || now.split('T')[0],
+                  c.created_at || now,
+                  c.contact_method || c.contact_type || 'Phone',
+                  c.outcome || null,
+                  c.feedback_1 || null,
+                  c.feedback_2 || null,
+                  c.additional_feedback || null,
+                  rawFb,
+                  c.source_file || null,
+                  c.application_id || primaryAppId || null,
+                  c.source_row || c.source_row_number || null
+                );
+              }
             }
           }
+
+          // Idempotent Row-Level Ledger Recording
+          const ledgerStatus = existingCandidate ? 'Matched' : 'Committed';
+
+          try {
+            insertLedgerStmt.run(
+              `mil-${comp}-${srcFile}-${srcRow}-${Date.now()}`,
+              jobId,
+              impId,
+              srcFile,
+              srcSheet,
+              srcRow,
+              comp,
+              normIdent,
+              p.full_name || null,
+              p.primary_email || null,
+              p.primary_phone || null,
+              p.current_title || (p.applications && p.applications[0]?.job_title) || null,
+              ledgerStatus,
+              p.person_id,
+              primaryAppId,
+              null,
+              now
+            );
+          } catch {
+            // Idempotent ledger safeguard
+          }
+
+          this.db.exec('RELEASE SAVEPOINT row_sp');
+          upsertedCount++;
+        } catch (rowErr: any) {
+          try { this.db.exec('ROLLBACK TO SAVEPOINT row_sp'); } catch { }
+          failedCount++;
+          rowErrors.push({
+            row: srcRow,
+            name: p.full_name || 'Candidate',
+            reason: rowErr.message || 'Row processing failed',
+          });
+          try {
+            insertLedgerStmt.run(
+              `mil-${comp}-${srcFile}-${srcRow}-${Date.now()}`,
+              jobId,
+              impId,
+              srcFile,
+              srcSheet,
+              srcRow,
+              comp,
+              normIdent,
+              p.full_name || null,
+              p.primary_email || null,
+              p.primary_phone || null,
+              p.current_title || null,
+              'Failed',
+              null,
+              null,
+              rowErr.message,
+              now
+            );
+          } catch { }
         }
       }
 
-      this.db.exec('COMMIT');
-      return { success: true, count: people.length, upserted: people.length, peopleIds };
-    } catch (err) {
-      try { this.db.exec('ROLLBACK'); } catch {}
-      throw err;
-    }
+      // Record batch and job summary atomically
+      if (options?.jobId && options?.batchNumber !== undefined) {
+        const batchId = `${options.jobId}-b-${options.batchNumber}`;
+        const nowIso = new Date().toISOString();
+        this.db.prepare(`
+          INSERT INTO master_import_batches (
+            id, job_id, batch_number, start_row, end_row, record_count, row_count,
+            successful_count, failed_count, new_candidates, matched_candidates,
+            new_applications, duplicate_applications, status, started_at, completed_at, error_details
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Completed', ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            successful_count = excluded.successful_count,
+            failed_count = excluded.failed_count,
+            new_candidates = excluded.new_candidates,
+            matched_candidates = excluded.matched_candidates,
+            new_applications = excluded.new_applications,
+            duplicate_applications = excluded.duplicate_applications,
+            status = 'Completed',
+            completed_at = excluded.completed_at,
+            error_details = excluded.error_details
+        `).run(
+          batchId,
+          options.jobId,
+          options.batchNumber,
+          options.startRow || 0,
+          options.endRow || 0,
+          people.length,
+          people.length,
+          upsertedCount,
+          failedCount,
+          newCandidatesCount,
+          matchedCandidatesCount,
+          newApplicationsCount,
+          duplicateApplicationsCount,
+          nowIso,
+          nowIso,
+          rowErrors.length > 0 ? JSON.stringify(rowErrors.slice(0, 5)) : null
+        );
+
+        this.db.prepare(`
+          UPDATE master_import_jobs SET
+            processed_rows = processed_rows + ?,
+            successful_rows = successful_rows + ?,
+            failed_rows = failed_rows + ?,
+            new_candidates = new_candidates + ?,
+            matched_candidates = matched_candidates + ?,
+            new_applications = new_applications + ?,
+            matched_applications = matched_applications + ?,
+            duplicate_applications = duplicate_applications + ?,
+            updated_at = ?
+          WHERE id = ?
+        `).run(
+          people.length,
+          upsertedCount,
+          failedCount,
+          newCandidatesCount,
+          matchedCandidatesCount,
+          newApplicationsCount,
+          0,
+          duplicateApplicationsCount,
+          nowIso,
+          options.jobId
+        );
+      }
+
+      return {
+        success: true,
+        count: people.length,
+        upserted: upsertedCount,
+        failed: failedCount,
+        errors: rowErrors,
+        peopleIds,
+      };
+    });
   }
 
   private ensureMasterPromotionInitialized(): void {
@@ -6064,6 +8303,387 @@ export class DatabaseService {
     } catch (err) {
       console.error('[DatabaseService] ensureMasterPromotionInitialized error:', err);
     }
+  }
+
+  // -------------------------------------------------------------
+  // DIGITAL MARKETING ENTERPRISE PERSISTENCE
+  // -------------------------------------------------------------
+  private initDefaultMarketing(): void {
+    try {
+      const mCount = (this.db.prepare('SELECT COUNT(*) as count FROM marketing_members').get() as { count: number }).count;
+      if (mCount === 0) {
+        const insertMember = this.db.prepare(`
+          INSERT INTO marketing_members (id, name, email, designation, company_access, is_active, avatar_initials, created_at)
+          VALUES (?, ?, ?, ?, ?, 1, ?, datetime('now'))
+        `);
+        const members = [
+          { id: 'mkt-001', name: 'Sarah Jenkins', email: 'sarah.j@aaratech.com', designation: 'Marketing Lead', access: ['AaraTech', 'ClinisolTech'], initials: 'SJ' },
+          { id: 'mkt-002', name: 'David Chen', email: 'david.c@aaratech.com', designation: 'Content Strategist', access: ['AaraTech', 'ClinisolTech'], initials: 'DC' },
+          { id: 'mkt-003', name: 'Priya Sharma', email: 'priya.s@clinisoltech.com', designation: 'Social Media Manager', access: ['AaraTech', 'ClinisolTech'], initials: 'PS' },
+          { id: 'mkt-004', name: 'Marcus Vance', email: 'marcus.v@aaratech.com', designation: 'SEO & Performance Specialist', access: ['AaraTech', 'ClinisolTech'], initials: 'MV' },
+          { id: 'mkt-005', name: 'Elena Rostova', email: 'elena.r@clinisoltech.com', designation: 'Creative Designer', access: ['AaraTech', 'ClinisolTech'], initials: 'ER' },
+        ];
+        for (const m of members) {
+          insertMember.run(m.id, m.name, m.email, m.designation, JSON.stringify(m.access), m.initials);
+        }
+      }
+
+      const tCount = (this.db.prepare('SELECT COUNT(*) as count FROM marketing_tasks').get() as { count: number }).count;
+      if (tCount === 0) {
+        const insertTask = this.db.prepare(`
+          INSERT INTO marketing_tasks (id, company, title, description, assigned_to_id, assigned_to_name, priority, status, due_date, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        `);
+        const tasks = [
+          { id: 'task-001', company: 'AaraTech', title: 'Q4 Talent Outreach Campaign Launch', desc: 'Prepare LinkedIn sponsored updates and copy for senior AI engineering roles.', toId: 'mkt-001', toName: 'Sarah Jenkins', prio: 'Urgent', status: 'In Progress', due: '2026-11-06' },
+          { id: 'task-002', company: 'AaraTech', title: 'Technical Case Study: Cloud Migration Services', desc: 'Draft 1,200-word engineering case study highlighting microservices architecture.', toId: 'mkt-002', toName: 'David Chen', prio: 'High', status: 'Backlog', due: '2026-11-09' },
+          { id: 'task-003', company: 'ClinisolTech', title: 'Clinical Data Management Webinar Promotion', desc: 'Create multi-channel promotion banner set and landing page announcement.', toId: 'mkt-003', toName: 'Priya Sharma', prio: 'High', status: 'In Progress', due: '2026-11-07' },
+          { id: 'task-004', company: 'ClinisolTech', title: 'Biostatistician Hiring Infographic', desc: 'Design clinical research talent landscape graphic for LinkedIn carousel.', toId: 'mkt-005', toName: 'Elena Rostova', prio: 'Medium', status: 'Review', due: '2026-11-05' },
+        ];
+        for (const t of tasks) {
+          insertTask.run(t.id, t.company, t.title, t.desc, t.toId, t.toName, t.prio, t.status, t.due);
+        }
+      }
+
+      const pCount = (this.db.prepare('SELECT COUNT(*) as count FROM marketing_posts').get() as { count: number }).count;
+      if (pCount === 0) {
+        const insertPost = this.db.prepare(`
+          INSERT INTO marketing_posts (id, company, channel, title, content, media_urls, scheduled_for, approval_status, author_id, author_name, reviewer_id, reviewer_name, reviewer_feedback, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+        `);
+        const posts = [
+          { id: 'post-001', company: 'AaraTech', chan: 'LinkedIn', title: 'Navigating Modern Cloud Architecture in 2026', content: 'Cloud infrastructure continues to evolve with hybrid AI deployment models. How is your engineering team optimizing cost and latency? Read our insights.', sched: '2026-11-05T12:00:00.000Z', status: 'Approved', aId: 'mkt-002', aName: 'David Chen', rId: 'mkt-001', rName: 'Sarah Jenkins', rFb: 'Looks great! Ready to publish on scheduled slot.' },
+          { id: 'post-002', company: 'ClinisolTech', chan: 'LinkedIn', title: 'Accelerating Phase III Clinical Trials with Validated EDC Pipelines', content: 'Data precision and GxP regulatory compliance drive successful therapeutic breakthroughs. ClinisolTech delivers expert SAS programming and CDISC standards.', sched: '2026-11-06T14:00:00.000Z', status: 'Under Review', aId: 'mkt-003', aName: 'Priya Sharma', rId: null, rName: null, rFb: null },
+        ];
+        for (const p of posts) {
+          insertPost.run(p.id, p.company, p.chan, p.title, p.content, p.sched, p.status, p.aId, p.aName, p.rId, p.rName, p.rFb);
+        }
+      }
+
+      const sCount = (this.db.prepare('SELECT COUNT(*) as count FROM marketing_settings').get() as { count: number }).count;
+      if (sCount === 0) {
+        const insertSetting = this.db.prepare("INSERT INTO marketing_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))");
+        insertSetting.run('portal_settings', JSON.stringify({ maxDailyBreakMinutes: 60, allowedBreakTypes: ['Lunch', 'Tea Break', 'Personal', 'Other'], requireEodReport: true }));
+        insertSetting.run('AaraTech_settings', JSON.stringify({ company: 'AaraTech', maxDailyBreakMinutes: 60, allowedBreakTypes: ['Lunch', 'Tea Break', 'Personal', 'Other'], requireEodReport: true, standardWorkHoursPerDay: 8 }));
+        insertSetting.run('ClinisolTech_settings', JSON.stringify({ company: 'ClinisolTech', maxDailyBreakMinutes: 60, allowedBreakTypes: ['Lunch', 'Tea Break', 'Personal', 'Other'], requireEodReport: true, standardWorkHoursPerDay: 8 }));
+      }
+    } catch (err) {
+      console.error('[DatabaseService] initDefaultMarketing error:', err);
+    }
+  }
+
+  getMarketingMembers(): any[] {
+    const rows = this.db.prepare('SELECT * FROM marketing_members ORDER BY name ASC').all() as any[];
+    return rows.map(r => ({
+      id: r.id,
+      name: r.name,
+      email: r.email,
+      designation: r.designation,
+      companyAccess: JSON.parse(r.company_access || '["AaraTech","ClinisolTech"]'),
+      isActive: Boolean(r.is_active),
+      avatarInitials: r.avatar_initials,
+    }));
+  }
+
+  upsertMarketingMember(m: any): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO marketing_members (id, name, email, designation, company_access, is_active, avatar_initials, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        email = excluded.email,
+        designation = excluded.designation,
+        company_access = excluded.company_access,
+        is_active = excluded.is_active,
+        avatar_initials = excluded.avatar_initials
+    `);
+    stmt.run(
+      m.id,
+      m.name,
+      m.email,
+      m.designation || '',
+      JSON.stringify(m.companyAccess || ['AaraTech', 'ClinisolTech']),
+      m.isActive ? 1 : 0,
+      m.avatarInitials || ''
+    );
+  }
+
+  getMarketingAttendance(companyFilter?: string, dateFilter?: string): any[] {
+    let sql = 'SELECT * FROM marketing_attendance WHERE 1=1';
+    const params: any[] = [];
+    if (companyFilter && companyFilter !== 'All') {
+      sql += " AND (company = ? OR company = 'Shared')";
+      params.push(companyFilter);
+    }
+    if (dateFilter) {
+      sql += ' AND work_date = ?';
+      params.push(dateFilter);
+    }
+    sql += ' ORDER BY check_in_time DESC';
+    const rows = this.db.prepare(sql).all(...params) as any[];
+    return rows.map(r => ({
+      id: r.id,
+      memberId: r.member_id,
+      memberName: r.member_name,
+      company: r.company,
+      workDate: r.work_date,
+      checkInTime: r.check_in_time,
+      checkOutTime: r.check_out_time,
+      totalHours: r.total_hours,
+      status: r.status,
+      notes: r.notes,
+      breaks: JSON.parse(r.breaks_json || '[]'),
+    }));
+  }
+
+  upsertMarketingAttendance(a: any): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO marketing_attendance (
+        id, member_id, member_name, company, work_date, check_in_time,
+        check_out_time, total_hours, status, notes, breaks_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        company = excluded.company,
+        work_date = excluded.work_date,
+        check_in_time = excluded.check_in_time,
+        check_out_time = excluded.check_out_time,
+        total_hours = excluded.total_hours,
+        status = excluded.status,
+        notes = excluded.notes,
+        breaks_json = excluded.breaks_json,
+        updated_at = datetime('now')
+    `);
+    stmt.run(
+      a.id,
+      a.memberId,
+      a.memberName,
+      a.company || 'Shared',
+      a.workDate,
+      a.checkInTime,
+      a.checkOutTime || null,
+      a.totalHours || null,
+      a.status || 'Present',
+      a.notes || '',
+      JSON.stringify(a.breaks || [])
+    );
+  }
+
+  getMarketingTasks(companyFilter?: string): any[] {
+    let sql = 'SELECT * FROM marketing_tasks WHERE 1=1';
+    const params: any[] = [];
+    if (companyFilter && companyFilter !== 'All') {
+      sql += " AND (company = ? OR company = 'Shared')";
+      params.push(companyFilter);
+    }
+    sql += ' ORDER BY created_at DESC';
+    const rows = this.db.prepare(sql).all(...params) as any[];
+    return rows.map(r => ({
+      id: r.id,
+      company: r.company,
+      title: r.title,
+      description: r.description,
+      assignedToId: r.assigned_to_id,
+      assignedToName: r.assigned_to_name,
+      priority: r.priority,
+      status: r.status,
+      dueDate: r.due_date,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  }
+
+  upsertMarketingTask(t: any): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO marketing_tasks (
+        id, company, title, description, assigned_to_id, assigned_to_name,
+        priority, status, due_date, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        company = excluded.company,
+        title = excluded.title,
+        description = excluded.description,
+        assigned_to_id = excluded.assigned_to_id,
+        assigned_to_name = excluded.assigned_to_name,
+        priority = excluded.priority,
+        status = excluded.status,
+        due_date = excluded.due_date,
+        updated_at = datetime('now')
+    `);
+    stmt.run(
+      t.id,
+      t.company,
+      t.title,
+      t.description || '',
+      t.assignedToId,
+      t.assignedToName,
+      t.priority || 'Medium',
+      t.status || 'Backlog',
+      t.dueDate || '',
+    );
+  }
+
+  deleteMarketingTask(id: string): void {
+    this.db.prepare('DELETE FROM marketing_tasks WHERE id = ?').run(id);
+  }
+
+  getMarketingPosts(companyFilter?: string): any[] {
+    let sql = 'SELECT * FROM marketing_posts WHERE 1=1';
+    const params: any[] = [];
+    if (companyFilter && companyFilter !== 'All') {
+      sql += " AND (company = ? OR company = 'Shared')";
+      params.push(companyFilter);
+    }
+    sql += ' ORDER BY scheduled_for ASC, created_at DESC';
+    const rows = this.db.prepare(sql).all(...params) as any[];
+    return rows.map(r => ({
+      id: r.id,
+      company: r.company,
+      channel: r.channel,
+      title: r.title,
+      content: r.content,
+      mediaUrls: JSON.parse(r.media_urls || '[]'),
+      scheduledFor: r.scheduled_for,
+      approvalStatus: r.approval_status,
+      authorId: r.author_id,
+      authorName: r.author_name,
+      reviewerId: r.reviewer_id,
+      reviewerName: r.reviewer_name,
+      reviewerFeedback: r.reviewer_feedback,
+      publishedAt: r.published_at,
+      livePostUrl: r.live_post_url,
+      createdAt: r.created_at,
+    }));
+  }
+
+  upsertMarketingPost(p: any): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO marketing_posts (
+        id, company, channel, title, content, media_urls, scheduled_for,
+        approval_status, author_id, author_name, reviewer_id, reviewer_name,
+        reviewer_feedback, published_at, live_post_url, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        company = excluded.company,
+        channel = excluded.channel,
+        title = excluded.title,
+        content = excluded.content,
+        media_urls = excluded.media_urls,
+        scheduled_for = excluded.scheduled_for,
+        approval_status = excluded.approval_status,
+        author_id = excluded.author_id,
+        author_name = excluded.author_name,
+        reviewer_id = excluded.reviewer_id,
+        reviewer_name = excluded.reviewer_name,
+        reviewer_feedback = excluded.reviewer_feedback,
+        published_at = excluded.published_at,
+        live_post_url = excluded.live_post_url,
+        updated_at = datetime('now')
+    `);
+    stmt.run(
+      p.id,
+      p.company,
+      p.channel,
+      p.title,
+      p.content,
+      JSON.stringify(p.mediaUrls || []),
+      p.scheduledFor,
+      p.approvalStatus || 'Draft',
+      p.authorId,
+      p.authorName,
+      p.reviewerId || null,
+      p.reviewerName || null,
+      p.reviewerFeedback || null,
+      p.publishedAt || null,
+      p.livePostUrl || null
+    );
+  }
+
+  deleteMarketingPost(id: string): void {
+    this.db.prepare('DELETE FROM marketing_posts WHERE id = ?').run(id);
+  }
+
+  getMarketingReports(companyFilter?: string, dateFilter?: string): any[] {
+    let sql = 'SELECT * FROM marketing_reports WHERE 1=1';
+    const params: any[] = [];
+    if (companyFilter && companyFilter !== 'All') {
+      sql += " AND (company = ? OR company = 'Shared')";
+      params.push(companyFilter);
+    }
+    if (dateFilter) {
+      sql += ' AND report_date = ?';
+      params.push(dateFilter);
+    }
+    sql += ' ORDER BY created_at DESC';
+    const rows = this.db.prepare(sql).all(...params) as any[];
+    return rows.map(r => ({
+      id: r.id,
+      memberId: r.member_id,
+      memberName: r.member_name,
+      company: r.company,
+      reportDate: r.report_date,
+      date: r.report_date,
+      tasksCompleted: r.tasks_completed,
+      inProgressTasks: r.in_progress_tasks,
+      blockers: r.blockers,
+      keyLearnings: r.key_learnings,
+      hoursWorked: r.hours_worked,
+      createdAt: r.created_at,
+    }));
+  }
+
+  upsertMarketingReport(r: any): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO marketing_reports (
+        id, member_id, member_name, company, report_date,
+        tasks_completed, in_progress_tasks, blockers, key_learnings, hours_worked, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        member_id = excluded.member_id,
+        member_name = excluded.member_name,
+        company = excluded.company,
+        report_date = excluded.report_date,
+        tasks_completed = excluded.tasks_completed,
+        in_progress_tasks = excluded.in_progress_tasks,
+        blockers = excluded.blockers,
+        key_learnings = excluded.key_learnings,
+        hours_worked = excluded.hours_worked
+    `);
+    stmt.run(
+      r.id,
+      r.memberId,
+      r.memberName,
+      r.company,
+      r.reportDate || r.date,
+      r.tasksCompleted || '',
+      r.inProgressTasks || '',
+      r.blockers || '',
+      r.keyLearnings || '',
+      r.hoursWorked || 0
+    );
+  }
+
+  getMarketingSettings(key?: string): any {
+    if (key) {
+      const row = this.db.prepare('SELECT value FROM marketing_settings WHERE key = ?').get(key) as any;
+      return row ? JSON.parse(row.value) : null;
+    }
+    const rows = this.db.prepare('SELECT * FROM marketing_settings').all() as any[];
+    const res: Record<string, any> = {};
+    for (const r of rows) {
+      res[r.key] = JSON.parse(r.value);
+    }
+    return res;
+  }
+
+  upsertMarketingSettings(key: string, value: any): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO marketing_settings (key, value, updated_at)
+      VALUES (?, ?, datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = datetime('now')
+    `);
+    stmt.run(key, JSON.stringify(value));
   }
 }
 

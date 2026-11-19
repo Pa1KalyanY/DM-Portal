@@ -33,6 +33,8 @@ import { dbService } from '../../services/masterDbService';
 import { generateAcceptanceTestFiles, downloadBlob } from '../../shared/testDataGenerator';
 import { ImportRecord } from '../../types/masterDatabase';
 import { geminiService } from '../../services/masterGeminiService';
+import { formatDateTimeDisplay } from '../../shared/dateFormat';
+import { api } from '../../api/client';
 
 interface ImportViewProps {
   onImportComplete: () => void;
@@ -85,6 +87,7 @@ export const ImportView: React.FC<ImportViewProps> = ({
   const [mappings, setMappings] = useState<ColumnMappingConfig[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+  const [statusMessage, setStatusMessage] = useState<string>('Deduplicating & Ingesting Master Dataset');
   const [completedReport, setCompletedReport] = useState<ImportRecord | null>(null);
   const [errorReportData, setErrorReportData] = useState<{ row: number; reason: string; rawData: any }[]>([]);
   const [targetCompany, setTargetCompany] = useState<'AaraTech' | 'ClinisolTech' | 'auto'>(defaultCompany);
@@ -95,10 +98,28 @@ export const ImportView: React.FC<ImportViewProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [importHistory, setImportHistory] = useState<ImportRecord[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [interruptedJob, setInterruptedJob] = useState<any | null>(null);
 
   useEffect(() => {
     loadImportHistory();
-  }, []);
+    checkInterruptedJobs();
+  }, [targetCompany]);
+
+  const checkInterruptedJobs = async () => {
+    try {
+      const effectiveComp = targetCompany !== 'auto' ? targetCompany : 'AaraTech';
+      const jobs = await api.getMasterImportJobs(effectiveComp);
+      const pending = jobs?.find((j: any) => j.status === 'Processing');
+      if (pending) {
+        const resumeInfo = await api.getMasterImportResumeInfo(pending.id);
+        setInterruptedJob(resumeInfo);
+      } else {
+        setInterruptedJob(null);
+      }
+    } catch (e) {
+      console.warn('Could not check interrupted jobs:', e);
+    }
+  };
 
   const loadImportHistory = async () => {
     try {
@@ -117,11 +138,14 @@ export const ImportView: React.FC<ImportViewProps> = ({
   const [aiEnhanceMessage, setAiEnhanceMessage] = useState<string | null>(null);
 
   const handleClearAllData = async () => {
-    if (window.confirm('Are you sure you want to CLEAR all candidate data and start completely fresh? All existing people, imports, and touchpoints will be wiped.')) {
-      await dbService.clearAllData();
+    const effectiveCompany: 'AaraTech' | 'ClinisolTech' = targetCompany !== 'auto' ? targetCompany : 'AaraTech';
+    const otherCompany = effectiveCompany === 'AaraTech' ? 'ClinisolTech' : 'AaraTech';
+    if (window.confirm(`Are you sure you want to clear candidate data for ${effectiveCompany}?\n\nThis will reset ${effectiveCompany} to 0 candidate records.\n\nAll ${otherCompany} records will remain 100% UNTOUCHED and preserved.`)) {
+      await dbService.clearAllData(effectiveCompany);
       setClearSuccess(true);
       setTimeout(() => setClearSuccess(false), 3500);
       onImportComplete();
+      window.dispatchEvent(new CustomEvent('workspace-data-updated', { detail: { action: 'cleared-company', company: effectiveCompany } }));
     }
   };
 
@@ -333,16 +357,22 @@ export const ImportView: React.FC<ImportViewProps> = ({
         targetCompany,
         targetGender,
         selectedSheet,
-        targetOwner
+        targetOwner,
+        dbService.getMaxPersonSequence()
       );
 
-      // Save to Supabase and permanent local database (IndexedDB)
+      // Save to Supabase and permanent local database (IndexedDB) and backend SQLite in chunks
+      setStatusMessage('Saving records to Master SQLite Database in 250-row chunks...');
       await dbService.saveImportBatch(
         result.newPeople,
         result.updatedPeople,
         result.importRecord,
         result.newPossibleMatches,
-        result.newIncompleteRecords
+        result.newIncompleteRecords,
+        (phase, current, total) => {
+          setStatusMessage(phase);
+          setProgress({ current, total });
+        }
       );
 
       setIncompleteRecordsCount(result.newIncompleteRecords.length);
@@ -350,6 +380,7 @@ export const ImportView: React.FC<ImportViewProps> = ({
       setErrorReportData(result.errorRows);
       onImportComplete();
       await loadImportHistory();
+      window.dispatchEvent(new CustomEvent('workspace-data-updated', { detail: { action: 'import-completed' } }));
     } catch (err: any) {
       setErrorMessage(err.message || 'An error occurred during import processing.');
     } finally {
@@ -429,13 +460,12 @@ export const ImportView: React.FC<ImportViewProps> = ({
         <select
           value={m.targetColumn}
           onChange={(e) => updateMapping(m.sourceColumn, e.target.value as TargetColumn)}
-          className={`px-3 py-1.5 bg-white border rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${
-            m.targetColumn === 'recruiter_feedback'
-              ? 'border-blue-300 text-blue-900 font-bold bg-blue-50/30'
-              : m.targetColumn === 'ignore'
+          className={`px-3 py-1.5 bg-white border rounded-lg text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors ${m.targetColumn === 'recruiter_feedback'
+            ? 'border-blue-300 text-blue-900 font-bold bg-blue-50/30'
+            : m.targetColumn === 'ignore'
               ? 'border-slate-200 text-slate-400'
               : 'border-slate-200 text-slate-800'
-          }`}
+            }`}
         >
           {TARGET_COLUMNS.map((tc) => (
             <option key={tc.value} value={tc.value}>
@@ -509,6 +539,32 @@ export const ImportView: React.FC<ImportViewProps> = ({
         </div>
       )}
 
+      {/* Resumable Job Alert */}
+      {interruptedJob && !completedReport && (
+        <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl text-amber-900 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs animate-fade-in">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold text-sm text-amber-950 flex items-center gap-2">
+                <span>Interrupted Import Job Detected</span>
+                <span className="font-mono text-xs bg-amber-200/70 text-amber-900 px-2 py-0.5 rounded font-semibold">{interruptedJob.jobId}</span>
+              </div>
+              <p className="text-amber-800 text-[11px] mt-1">
+                Previous upload stopped at row <strong>{interruptedJob.maxCompletedRow || interruptedJob.processedRows}</strong> of {interruptedJob.totalRows}. <strong>{interruptedJob.successfulRows}</strong> records are safely stored in {interruptedJob.company} database.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setInterruptedJob(null)}
+              className="px-3 py-1.5 bg-white border border-amber-200 hover:bg-amber-100 text-amber-800 rounded-lg font-semibold text-xs transition-colors cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Target Company Selection: Strictly Separated Candidate Pools */}
       {!completedReport && (
         <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-xs space-y-3">
@@ -530,11 +586,10 @@ export const ImportView: React.FC<ImportViewProps> = ({
             <button
               type="button"
               onClick={() => setTargetCompany('AaraTech')}
-              className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
-                targetCompany === 'AaraTech'
-                  ? 'bg-blue-50/90 border-blue-600 text-blue-950 ring-2 ring-blue-500/20 shadow-xs'
-                  : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
-              }`}
+              className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${targetCompany === 'AaraTech'
+                ? 'bg-blue-50/90 border-blue-600 text-blue-950 ring-2 ring-blue-500/20 shadow-xs'
+                : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
+                }`}
             >
               <div className="flex items-center justify-between">
                 <span className="font-bold text-sm text-slate-900">AaraTech Database</span>
@@ -553,11 +608,10 @@ export const ImportView: React.FC<ImportViewProps> = ({
             <button
               type="button"
               onClick={() => setTargetCompany('ClinisolTech')}
-              className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${
-                targetCompany === 'ClinisolTech'
-                  ? 'bg-indigo-50/90 border-indigo-600 text-indigo-950 ring-2 ring-indigo-500/20 shadow-xs'
-                  : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
-              }`}
+              className={`p-4 rounded-xl border text-left transition-all cursor-pointer ${targetCompany === 'ClinisolTech'
+                ? 'bg-indigo-50/90 border-indigo-600 text-indigo-950 ring-2 ring-indigo-500/20 shadow-xs'
+                : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
+                }`}
             >
               <div className="flex items-center justify-between">
                 <span className="font-bold text-sm text-slate-900">ClinisolTech Database</span>
@@ -603,11 +657,10 @@ export const ImportView: React.FC<ImportViewProps> = ({
             <button
               type="button"
               onClick={() => setTargetGender('auto')}
-              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
-                targetGender === 'auto'
-                  ? 'bg-blue-50/80 border-blue-600 text-blue-950 ring-2 ring-blue-500/20 shadow-xs'
-                  : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
-              }`}
+              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${targetGender === 'auto'
+                ? 'bg-blue-50/80 border-blue-600 text-blue-950 ring-2 ring-blue-500/20 shadow-xs'
+                : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
+                }`}
             >
               <div className="flex items-center justify-between">
                 <span className="font-bold text-sm text-slate-900">Auto-Detect (Recommended)</span>
@@ -621,11 +674,10 @@ export const ImportView: React.FC<ImportViewProps> = ({
             <button
               type="button"
               onClick={() => setTargetGender('Male')}
-              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
-                targetGender === 'Male'
-                  ? 'bg-blue-50/80 border-blue-600 text-blue-950 ring-2 ring-blue-500/20 shadow-xs'
-                  : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
-              }`}
+              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${targetGender === 'Male'
+                ? 'bg-blue-50/80 border-blue-600 text-blue-950 ring-2 ring-blue-500/20 shadow-xs'
+                : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
+                }`}
             >
               <div className="flex items-center justify-between">
                 <span className="font-bold text-sm text-blue-800">♂ Force Batch as Male</span>
@@ -639,11 +691,10 @@ export const ImportView: React.FC<ImportViewProps> = ({
             <button
               type="button"
               onClick={() => setTargetGender('Female')}
-              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
-                targetGender === 'Female'
-                  ? 'bg-rose-50/80 border-rose-600 text-rose-950 ring-2 ring-rose-500/20 shadow-xs'
-                  : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
-              }`}
+              className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${targetGender === 'Female'
+                ? 'bg-rose-50/80 border-rose-600 text-rose-950 ring-2 ring-rose-500/20 shadow-xs'
+                : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700'
+                }`}
             >
               <div className="flex items-center justify-between">
                 <span className="font-bold text-sm text-rose-800">♀ Force Batch as Female</span>
@@ -669,11 +720,10 @@ export const ImportView: React.FC<ImportViewProps> = ({
                 setImportMode('upload');
                 setErrorMessage(null);
               }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                importMode === 'upload'
-                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200/60'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${importMode === 'upload'
+                ? 'bg-white text-slate-900 shadow-xs border border-slate-200/60'
+                : 'text-slate-600 hover:text-slate-900'
+                }`}
             >
               <UploadCloud className="w-4 h-4 text-blue-600" />
               <span>Upload Spreadsheet File (XLSX, XLS, CSV)</span>
@@ -684,11 +734,10 @@ export const ImportView: React.FC<ImportViewProps> = ({
                 setImportMode('paste');
                 setErrorMessage(null);
               }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                importMode === 'paste'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${importMode === 'paste'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+                }`}
             >
               <Clipboard className="w-4 h-4" />
               <span>Copy &amp; Paste Rows (Excel, Google Sheets, CSV)</span>
@@ -702,11 +751,10 @@ export const ImportView: React.FC<ImportViewProps> = ({
               onDragLeave={handleDrag}
               onDragOver={handleDrag}
               onDrop={handleDrop}
-              className={`border-2 border-dashed rounded-2xl p-12 text-center transition-all ${
-                dragActive
-                  ? 'border-blue-500 bg-blue-50/50 scale-[1.005]'
-                  : 'border-slate-300 bg-white hover:border-slate-400'
-              }`}
+              className={`border-2 border-dashed rounded-2xl p-12 text-center transition-all ${dragActive
+                ? 'border-blue-500 bg-blue-50/50 scale-[1.005]'
+                : 'border-slate-300 bg-white hover:border-slate-400'
+                }`}
             >
               <input
                 ref={fileInputRef}
@@ -1121,11 +1169,10 @@ export const ImportView: React.FC<ImportViewProps> = ({
                         handleFileSelected(selectedFile, s);
                       }
                     }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                      selectedSheet === s
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    }`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${selectedSheet === s
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
                   >
                     <FileSpreadsheet className="w-3.5 h-3.5" />
                     <span>{s}</span>
@@ -1169,22 +1216,52 @@ export const ImportView: React.FC<ImportViewProps> = ({
 
           {/* Progress Bar when running */}
           {isProcessing && (
-            <div className="bg-white p-6 rounded-xl border border-slate-200/80 shadow-xs space-y-3">
-              <div className="flex justify-between text-sm font-semibold text-slate-800">
-                <span>Deduplicating &amp; Ingesting Rows...</span>
-                <span>
-                  {progress.current} / {progress.total} rows ({Math.round((progress.current / (progress.total || 1)) * 100)}%)
-                </span>
+            <div className="bg-white p-6 rounded-2xl border border-blue-200/90 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 text-blue-600 animate-spin" />
+                    <span>{statusMessage}</span>
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Transactional 250-row batch execution with immediate write-lock safety and per-row error isolation.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="text-sm font-mono font-bold text-blue-600">
+                    {progress.current} / {progress.total} rows
+                  </span>
+                  <span className="text-xs font-semibold text-slate-500 ml-2">
+                    ({Math.round((progress.current / (progress.total || 1)) * 100)}%)
+                  </span>
+                </div>
               </div>
-              <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
+
+              <div className="w-full h-3.5 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200">
                 <div
-                  className="h-full bg-blue-600 transition-all duration-200 rounded-full"
+                  className="h-full bg-blue-600 transition-all duration-300 rounded-full"
                   style={{ width: `${Math.round((progress.current / (progress.total || 1)) * 100)}%` }}
                 />
               </div>
-              <p className="text-xs text-slate-500">
-                Running normalization, US phone parsing, duplicate match comparison, and relational inserts.
-              </p>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-100 text-xs">
+                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                  <div className="text-slate-500 text-[10px] uppercase font-semibold">Processed</div>
+                  <div className="text-slate-900 font-bold font-mono">{progress.current}</div>
+                </div>
+                <div className="bg-blue-50/60 p-2.5 rounded-lg border border-blue-100">
+                  <div className="text-blue-600 text-[10px] uppercase font-semibold">Remaining</div>
+                  <div className="text-blue-900 font-bold font-mono">{Math.max(0, progress.total - progress.current)}</div>
+                </div>
+                <div className="bg-purple-50/60 p-2.5 rounded-lg border border-purple-100">
+                  <div className="text-purple-600 text-[10px] uppercase font-semibold">Batch Chunk Size</div>
+                  <div className="text-purple-900 font-bold font-mono">250 rows / commit</div>
+                </div>
+                <div className="bg-emerald-50/60 p-2.5 rounded-lg border border-emerald-100">
+                  <div className="text-emerald-600 text-[10px] uppercase font-semibold">Database Mode</div>
+                  <div className="text-emerald-900 font-bold font-mono">WAL + Busy Timeout</div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1508,7 +1585,7 @@ export const ImportView: React.FC<ImportViewProps> = ({
                       <td className="py-2.5 px-4 font-semibold text-amber-600">{imp.possible_matches}</td>
                       <td className="py-2.5 px-4 font-semibold text-rose-600">{imp.errors}</td>
                       <td className="py-2.5 px-4 font-mono text-slate-500">
-                        {new Date(imp.created_at).toLocaleDateString()} {new Date(imp.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {formatDateTimeDisplay(imp.created_at)}
                       </td>
                       <td className="py-2.5 px-4">
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">

@@ -278,13 +278,17 @@ export interface PaginationParams {
   masterPersonId?: string;
   linkStatus?: string;
   activeBatchOnly?: boolean;
+  viewMode?: 'working_batch' | 'permanent_history';
 }
 
 export interface TabCounts {
   pass: number;
+  allPassed?: number;
   fail: number;
   review: number;
+  duplicate?: number;
   all: number;
+  uniquePassed?: number;
 }
 
 export interface PaginatedResult<T> {

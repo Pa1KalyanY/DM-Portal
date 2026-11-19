@@ -213,6 +213,17 @@ export const MarketingService = {
   // Members
   async getMembers(): Promise<MarketingMember[]> {
     const local = getStored<MarketingMember[]>(STORAGE_KEYS.MEMBERS, INITIAL_MARKETING_TEAM);
+    try {
+      const res = await fetch('/api/marketing/members');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setStored(STORAGE_KEYS.MEMBERS, data);
+          return data;
+        }
+      }
+    } catch {}
+
     // Background Supabase sync attempt
     const client = getSupabaseClient();
     if (client) {
@@ -240,6 +251,44 @@ export const MarketingService = {
       }
     }
     return local;
+  },
+
+  // Authoritative server synchronization
+  async syncFromServer(): Promise<void> {
+    try {
+      const [membersRes, attRes, tasksRes, postsRes, reportsRes, settingsRes] = await Promise.allSettled([
+        fetch('/api/marketing/members').then(r => r.ok ? r.json() : null),
+        fetch('/api/marketing/attendance').then(r => r.ok ? r.json() : null),
+        fetch('/api/marketing/tasks').then(r => r.ok ? r.json() : null),
+        fetch('/api/marketing/posts').then(r => r.ok ? r.json() : null),
+        fetch('/api/marketing/reports').then(r => r.ok ? r.json() : null),
+        fetch('/api/marketing/settings').then(r => r.ok ? r.json() : null),
+      ]);
+
+      if (membersRes.status === 'fulfilled' && membersRes.value?.length) {
+        setStored(STORAGE_KEYS.MEMBERS, membersRes.value);
+      }
+      if (attRes.status === 'fulfilled' && attRes.value?.length) {
+        setStored(STORAGE_KEYS.ATTENDANCE, attRes.value);
+      }
+      if (tasksRes.status === 'fulfilled' && tasksRes.value?.length) {
+        setStored(STORAGE_KEYS.TASKS, tasksRes.value);
+      }
+      if (postsRes.status === 'fulfilled' && postsRes.value?.length) {
+        setStored(STORAGE_KEYS.POSTS, postsRes.value);
+      }
+      if (reportsRes.status === 'fulfilled' && reportsRes.value?.length) {
+        setStored(STORAGE_KEYS.REPORTS, reportsRes.value);
+      }
+      if (settingsRes.status === 'fulfilled' && settingsRes.value) {
+        const s = settingsRes.value;
+        if (s.portal_settings) setStored(STORAGE_KEYS.PORTAL_SETTINGS, s.portal_settings);
+        const compSettings = getStored<Record<CompanyName, MarketingCompanySettings>>(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS);
+        if (s.AaraTech_settings) compSettings['AaraTech'] = s.AaraTech_settings;
+        if (s.ClinisolTech_settings) compSettings['ClinisolTech'] = s.ClinisolTech_settings;
+        setStored(STORAGE_KEYS.SETTINGS, compSettings);
+      }
+    } catch {}
   },
 
   // Active Session & Attendance
@@ -288,6 +337,12 @@ export const MarketingService = {
     all.unshift(newRecord);
     setStored(STORAGE_KEYS.ATTENDANCE, all);
 
+    fetch('/api/marketing/attendance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newRecord),
+    }).catch(() => {});
+
     // Sync to Supabase in background
     const client = getSupabaseClient();
     if (client) {
@@ -334,6 +389,12 @@ export const MarketingService = {
 
     all[idx] = record;
     setStored(STORAGE_KEYS.ATTENDANCE, all);
+
+    fetch('/api/marketing/attendance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(record),
+    }).catch(() => {});
 
     const client = getSupabaseClient();
     if (client) {
@@ -382,6 +443,12 @@ export const MarketingService = {
     all[idx] = record;
     setStored(STORAGE_KEYS.ATTENDANCE, all);
 
+    fetch('/api/marketing/attendance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(record),
+    }).catch(() => {});
+
     const client = getSupabaseClient();
     if (client) {
       try {
@@ -414,6 +481,12 @@ export const MarketingService = {
 
       all[idx] = record;
       setStored(STORAGE_KEYS.ATTENDANCE, all);
+
+      fetch('/api/marketing/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(record),
+      }).catch(() => {});
 
       const client = getSupabaseClient();
       if (client) {
@@ -452,6 +525,11 @@ export const MarketingService = {
       if (idx !== -1) {
         all[idx] = { ...all[idx], ...task, updatedAt: now };
         setStored(STORAGE_KEYS.TASKS, all);
+        fetch('/api/marketing/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(all[idx]),
+        }).catch(() => {});
         return all[idx];
       }
     }
@@ -464,6 +542,11 @@ export const MarketingService = {
     };
     all.unshift(newTask);
     setStored(STORAGE_KEYS.TASKS, all);
+    fetch('/api/marketing/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newTask),
+    }).catch(() => {});
     return newTask;
   },
 
@@ -474,6 +557,11 @@ export const MarketingService = {
       item.status = status;
       item.updatedAt = new Date().toISOString();
       setStored(STORAGE_KEYS.TASKS, all);
+      fetch('/api/marketing/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      }).catch(() => {});
     }
   },
 
@@ -481,6 +569,7 @@ export const MarketingService = {
     const all = getStored<MarketingTask[]>(STORAGE_KEYS.TASKS, INITIAL_TASKS);
     const filtered = all.filter((t) => t.id !== taskId);
     setStored(STORAGE_KEYS.TASKS, filtered);
+    fetch(`/api/marketing/tasks/${taskId}`, { method: 'DELETE' }).catch(() => {});
   },
 
   // Content Calendar & Posts
@@ -508,6 +597,11 @@ export const MarketingService = {
       if (idx !== -1) {
         all[idx] = { ...all[idx], ...post };
         setStored(STORAGE_KEYS.POSTS, all);
+        fetch('/api/marketing/posts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(all[idx]),
+        }).catch(() => {});
         return all[idx];
       }
     }
@@ -519,6 +613,11 @@ export const MarketingService = {
     };
     all.unshift(newPost);
     setStored(STORAGE_KEYS.POSTS, all);
+    fetch('/api/marketing/posts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newPost),
+    }).catch(() => {});
     return newPost;
   },
 
@@ -539,7 +638,19 @@ export const MarketingService = {
         item.publishedAt = new Date().toISOString();
       }
       setStored(STORAGE_KEYS.POSTS, all);
+      fetch('/api/marketing/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item),
+      }).catch(() => {});
     }
+  },
+
+  async deleteContentPost(postId: string): Promise<void> {
+    const all = getStored<ContentPost[]>(STORAGE_KEYS.POSTS, INITIAL_POSTS);
+    const filtered = all.filter((p) => p.id !== postId);
+    setStored(STORAGE_KEYS.POSTS, filtered);
+    fetch(`/api/marketing/posts/${postId}`, { method: 'DELETE' }).catch(() => {});
   },
 
   // Daily Work Reports
@@ -568,6 +679,12 @@ export const MarketingService = {
     all.unshift(newReport);
     setStored(STORAGE_KEYS.REPORTS, all);
 
+    fetch('/api/marketing/reports', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newReport),
+    }).catch(() => {});
+
     const client = getSupabaseClient();
     if (client) {
       try {
@@ -595,6 +712,11 @@ export const MarketingService = {
 
   savePortalSettings(settings: MarketingPortalSettings): void {
     setStored(STORAGE_KEYS.PORTAL_SETTINGS, settings);
+    fetch('/api/marketing/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'portal_settings', value: settings }),
+    }).catch(() => {});
   },
 
   getCompanySettings(company: CompanyName): MarketingCompanySettings {
@@ -606,5 +728,10 @@ export const MarketingService = {
     const all = getStored<Record<CompanyName, MarketingCompanySettings>>(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS);
     all[settings.company] = settings;
     setStored(STORAGE_KEYS.SETTINGS, all);
+    fetch('/api/marketing/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: `${settings.company}_settings`, value: settings }),
+    }).catch(() => {});
   },
 };

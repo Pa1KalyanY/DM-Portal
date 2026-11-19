@@ -121,12 +121,18 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
     try {
       const targetCompany = companyToTest || recruitmentCompany;
       const res = await checkSupabaseHealth(targetCompany);
-      setSupabaseStatus(res);
+      setSupabaseStatus(prev => {
+        if (prev && !prev.connected && res.connected) {
+          // Auto-reconnected: notify workspace to reload fresh data
+          window.dispatchEvent(new CustomEvent('workspace-data-updated', { detail: { company: targetCompany } }));
+        }
+        return res;
+      });
     } catch {
       setSupabaseStatus({
         connected: false,
         status: 'error',
-        message: 'Could not connect to Supabase',
+        message: 'Could not connect to database server',
         timestamp: new Date().toLocaleTimeString(),
         company: companyToTest || recruitmentCompany,
       });
@@ -134,7 +140,50 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
   };
 
   useEffect(() => {
-    refreshSupabase(recruitmentCompany);
+    let active = true;
+    let fastRetryTimer: ReturnType<typeof setTimeout> | null = null;
+    let fastRetries = 0;
+
+    const probe = async () => {
+      await refreshSupabase(recruitmentCompany);
+      if (!active) return;
+    };
+
+    const runWithFastStartupRetry = async () => {
+      try {
+        const res = await checkSupabaseHealth(recruitmentCompany);
+        if (!active) return;
+        setSupabaseStatus(prev => {
+          if (prev && !prev.connected && res.connected) {
+            window.dispatchEvent(new CustomEvent('workspace-data-updated', { detail: { company: recruitmentCompany } }));
+          }
+          return res;
+        });
+        if (!res.connected && fastRetries < 5) {
+          fastRetries++;
+          fastRetryTimer = setTimeout(runWithFastStartupRetry, 2000);
+        }
+      } catch {
+        if (!active) return;
+        if (fastRetries < 5) {
+          fastRetries++;
+          fastRetryTimer = setTimeout(runWithFastStartupRetry, 2000);
+        }
+      }
+    };
+
+    runWithFastStartupRetry();
+    const interval = setInterval(() => {
+      probe();
+    }, 10000);
+    const onFocus = () => probe();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      active = false;
+      if (fastRetryTimer) clearTimeout(fastRetryTimer);
+      clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [recruitmentCompany]);
 
   const login = async (email: string, password: string) => {

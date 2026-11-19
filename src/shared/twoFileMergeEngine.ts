@@ -399,7 +399,7 @@ export function mergeCandidateNonDestructive(
       company: appCompany,
       job_id: incoming.job_id || null,
       job_title: appRole,
-      date_applied: incoming.application_collected_date || incoming.recruiter_assigned_date || now.split('T')[0],
+      date_applied: incoming.application_collected_date || incoming.recruiter_assigned_date || '',
       current_stage: incoming.status || merged.current_status || 'Applied',
       source_file: provenance.sourceFile,
       source_row: provenance.sourceRow || 0,

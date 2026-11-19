@@ -1,8 +1,16 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { DatabaseService } from './db.js';
 
 console.log('--- START COMPANY ISOLATED CLEAR VERIFICATION TESTS ---');
 
-const db = new DatabaseService();
+const TEST_DB_PATH = path.resolve(process.cwd(), 'server', 'test_isolated_clear.db');
+if (fs.existsSync(TEST_DB_PATH)) {
+  fs.unlinkSync(TEST_DB_PATH);
+}
+
+// Pass custom DB path so production DB is NEVER touched during testing
+const db = new DatabaseService(TEST_DB_PATH);
 
 // 1. Seed AaraTech candidate
 const aaraCandId = 'test-aara-' + Date.now();
@@ -140,3 +148,11 @@ console.log('✓ PASS: ClinisolTech candidate successfully wiped when requested.
 console.log('\n================================================================');
 console.log('ALL COMPANY-ISOLATED CLEAR VERIFICATION TESTS PASSED (100%)');
 console.log('================================================================');
+
+try {
+  if (fs.existsSync(TEST_DB_PATH)) {
+    fs.unlinkSync(TEST_DB_PATH);
+  }
+} catch (e) {
+  // ignore
+}

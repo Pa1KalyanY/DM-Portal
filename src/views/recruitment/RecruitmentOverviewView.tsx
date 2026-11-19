@@ -22,6 +22,7 @@ import {
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { DashboardStats, ImportRecord } from '../../types';
 import { api } from '../../api/client';
+import { formatDateDisplay } from '../../shared/dateFormat';
 
 interface RecruitmentOverviewProps {
   onNavigate: (section: string) => void;
@@ -31,7 +32,7 @@ export const RecruitmentOverviewView: React.FC<RecruitmentOverviewProps> = ({ on
   const { activeCompany, setActiveCompany, isDualCompany } = useWorkspace();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentBatches, setRecentBatches] = useState<ImportRecord[]>([]);
-  const [masterStats, setMasterStats] = useState<{ totalPeople: number; activeCandidates: number } | null>(null);
+  const [masterStats, setMasterStats] = useState<{ totalPeople: number; totalCandidates?: number; activeCandidates: number } | null>(null);
   const [jobs, setJobs] = useState<Array<{ jobId: string; jobTitle: string; total: number; passed: number; failed: number; manualReview: number }>>([]);
   const [loading, setLoading] = useState(true);
 
@@ -176,7 +177,7 @@ export const RecruitmentOverviewView: React.FC<RecruitmentOverviewProps> = ({ on
             <Database className="w-4 h-4 text-[#4A63C7]" />
           </div>
           <div className="text-2xl font-bold text-[#18243A] mt-2 tabular-nums">
-            {loading ? '...' : (masterStats?.totalPeople || 0).toLocaleString()}
+            {loading ? '...' : (masterStats?.totalCandidates ?? masterStats?.totalPeople ?? 0).toLocaleString()}
           </div>
           <p className="text-[11px] text-[#4A63C7] mt-0.5 font-medium">Unified unique candidates</p>
         </div>
@@ -358,7 +359,7 @@ export const RecruitmentOverviewView: React.FC<RecruitmentOverviewProps> = ({ on
                         {b.importCode}
                       </span>
                       <span className="text-[11px] text-slate-500">
-                        {b.uploadedAt ? new Date(b.uploadedAt).toLocaleDateString() : ''}
+                        {formatDateDisplay(b.uploadedAt, '—')}
                       </span>
                     </div>
                     <p className="text-xs text-slate-700 font-medium truncate mt-0.5">

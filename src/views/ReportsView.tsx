@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FileBarChart2, Download, FileSpreadsheet, FileText, CheckCircle2, XCircle, AlertTriangle, Copy } from 'lucide-react';
 import { DashboardStats } from '../types';
 import { api } from '../api/client';
+import { formatDateDisplay } from '../shared/dateFormat';
 
 export const ReportsView: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -115,7 +116,7 @@ export const ReportsView: React.FC = () => {
             </div>
             <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
               <span className="text-slate-400 font-semibold block text-[11px]">Generated Date</span>
-              <strong className="text-xs text-slate-800 font-bold mt-2 block">{new Date().toLocaleDateString()}</strong>
+              <strong className="text-xs text-slate-800 font-bold mt-2 block">{formatDateDisplay(new Date())}</strong>
             </div>
           </div>
         </div>

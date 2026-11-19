@@ -317,17 +317,37 @@ export const AuthView: React.FC<AuthViewProps> = ({ onLoginSuccess }) => {
           {/* Quick Demo Access */}
           {mode === 'login' && (
             <div className="pt-3 border-t border-slate-100 space-y-2">
-              <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-                Quick Access
-              </span>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('admin@aaratech.com')}
-                className="w-full py-1.5 px-3 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium border border-slate-200 transition-all flex items-center justify-between"
-              >
-                <span>Admin Login (Dual Workspace Access)</span>
-                <span className="text-[10px] text-blue-600 font-mono">admin@aaratech.com</span>
-              </button>
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Demo Credentials (Password: <code className="text-blue-600 font-bold font-mono">password123</code>)
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogin('admin@aaratech.com')}
+                  className="w-full py-1.5 px-3 rounded-lg bg-blue-50/70 hover:bg-blue-100 text-slate-700 text-xs font-medium border border-blue-200 transition-all flex items-center justify-between cursor-pointer"
+                >
+                  <span className="font-semibold text-blue-900">Admin (Dual Workspace)</span>
+                  <span className="text-[10px] text-blue-700 font-mono">admin@aaratech.com</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogin('marketing@clinisoltech.com')}
+                  className="w-full py-1.5 px-3 rounded-lg bg-emerald-50/70 hover:bg-emerald-100 text-slate-700 text-xs font-medium border border-emerald-200 transition-all flex items-center justify-between cursor-pointer"
+                >
+                  <span className="font-semibold text-emerald-900">ClinisolTech Recruiter</span>
+                  <span className="text-[10px] text-emerald-700 font-mono">marketing@clinisoltech.com</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogin('marketing@aaratech.com')}
+                  className="w-full py-1.5 px-3 rounded-lg bg-indigo-50/70 hover:bg-indigo-100 text-slate-700 text-xs font-medium border border-indigo-200 transition-all flex items-center justify-between cursor-pointer"
+                >
+                  <span className="font-semibold text-indigo-900">AaraTech Recruiter</span>
+                  <span className="text-[10px] text-indigo-700 font-mono">marketing@aaratech.com</span>
+                </button>
+              </div>
             </div>
           )}
         </div>

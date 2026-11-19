@@ -22,6 +22,7 @@ import {
   MarketingService,
   INITIAL_MARKETING_TEAM,
 } from '../../services/marketingService';
+import { formatDateDisplay } from '../../shared/dateFormat';
 import {
   MarketingMember,
   AttendanceRecord,
@@ -166,6 +167,7 @@ export const MarketingWorkspaceView: React.FC = () => {
 
   // Refresh data across the shared marketing workspace
   const refreshData = async () => {
+    await MarketingService.syncFromServer();
     const members = await MarketingService.getMembers();
     setTeamMembers(members);
 
@@ -575,7 +577,7 @@ export const MarketingWorkspaceView: React.FC = () => {
                   <tbody className="divide-y divide-slate-100">
                     {attendanceList.map((a) => (
                       <tr key={a.id} className="hover:bg-slate-50/60">
-                        <td className="py-2.5 px-3 font-mono text-slate-800">{a.workDate}</td>
+                        <td className="py-2.5 px-3 font-mono text-slate-800">{formatDateDisplay(a.workDate)}</td>
                         <td className="py-2.5 px-3 font-semibold text-slate-900">{a.memberName}</td>
                         <td className="py-2.5 px-3 text-slate-600">
                           {new Date(a.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -691,9 +693,21 @@ export const MarketingWorkspaceView: React.FC = () => {
                         )}
                         <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-500">
                           <span className="font-medium text-slate-700">{task.assignedToName}</span>
-                          <span>Due {task.dueDate}</span>
+                          <span>Due {formatDateDisplay(task.dueDate)}</span>
                         </div>
-                        <div className="pt-1 flex items-center gap-1 justify-end">
+                        <div className="pt-1 flex items-center gap-2 justify-end">
+                          <button
+                            onClick={async () => {
+                              if (confirm(`Delete task "${task.title}"?`)) {
+                                await MarketingService.deleteTask(task.id);
+                                refreshData();
+                              }
+                            }}
+                            className="text-[10px] text-rose-500 hover:text-rose-700 font-semibold"
+                            title="Delete task"
+                          >
+                            Delete
+                          </button>
                           {status !== 'Completed' && (
                             <button
                               onClick={() => {
@@ -795,7 +809,7 @@ export const MarketingWorkspaceView: React.FC = () => {
                 <div className="pt-3 border-t border-slate-100 text-xs space-y-2">
                   <div className="flex items-center justify-between text-[11px] text-slate-500">
                     <span>By: <strong className="text-slate-800">{post.authorName}</strong></span>
-                    <span>Sched: {new Date(post.scheduledFor).toLocaleDateString()}</span>
+                    <span>Sched: {formatDateDisplay(post.scheduledFor)}</span>
                   </div>
 
                   {post.approvalStatus === 'Under Review' && (
@@ -824,6 +838,21 @@ export const MarketingWorkspaceView: React.FC = () => {
                       Publish to {post.channel}
                     </button>
                   )}
+
+                  <div className="flex items-center justify-end pt-2 border-t border-slate-100 mt-2">
+                    <button
+                      onClick={async () => {
+                        if (confirm(`Delete post "${post.title}"?`)) {
+                          await MarketingService.deleteContentPost(post.id);
+                          refreshData();
+                        }
+                      }}
+                      className="text-[10px] text-rose-500 hover:text-rose-700 font-semibold"
+                      title="Delete post"
+                    >
+                      Delete Post
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}

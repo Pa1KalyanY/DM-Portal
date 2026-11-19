@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { dbService } from '../services/masterDbService';
 import { Job, CompanyName } from '../types/masterDatabase';
+import { formatDateDisplay } from '../shared/dateFormat';
 
 interface JobsViewProps {
   initialCompany?: CompanyName | 'All';
@@ -202,7 +203,7 @@ export const JobsView: React.FC<JobsViewProps> = ({ initialCompany = 'All' }) =>
                     </span>
                   </td>
                   <td className="py-3 px-4 text-xs font-mono text-slate-500">
-                    {new Date(j.created_at).toLocaleDateString()}
+                    {formatDateDisplay(j.created_at)}
                   </td>
                   <td className="py-3 px-4 text-right">
                     <button

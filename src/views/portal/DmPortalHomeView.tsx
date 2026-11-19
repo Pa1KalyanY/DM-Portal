@@ -16,6 +16,7 @@ import {
   Briefcase
 } from 'lucide-react';
 import { MarketingService, INITIAL_MARKETING_TEAM } from '../../services/marketingService';
+import { formatDateDisplay } from '../../shared/dateFormat';
 
 import {
   MarketingTask,
@@ -355,7 +356,7 @@ export const DmPortalHomeView: React.FC<DmPortalHomeProps> = ({ onNavigate }) =>
                     <h3 className="text-xs font-bold text-slate-900 line-clamp-1">{p.title}</h3>
                     <p className="text-[11px] text-slate-500 line-clamp-2">{p.content}</p>
                     <div className="text-[10px] text-slate-400 pt-1 border-t border-slate-100 flex items-center justify-between">
-                      <span>Scheduled: {p.scheduledFor ? new Date(p.scheduledFor).toLocaleDateString() : 'N/A'}</span>
+                      <span>Scheduled: {formatDateDisplay(p.scheduledFor, 'N/A')}</span>
                     </div>
                   </div>
                 ))}

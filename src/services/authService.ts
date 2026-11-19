@@ -63,6 +63,7 @@ export const authService = {
    */
   getCurrentSession(): UserSession | null {
     try {
+      if (typeof localStorage === 'undefined') return null;
       const stored = localStorage.getItem(SESSION_STORAGE_KEY);
       return stored ? JSON.parse(stored) : null;
     } catch {
@@ -93,7 +94,7 @@ export const authService = {
             role: (data.user.user_metadata?.role as any) || 'admin',
             company: (data.user.user_metadata?.company as any) || 'Both',
           };
-          localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(userSession));
+          if (typeof localStorage !== 'undefined') localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(userSession));
           return { success: true, user: userSession };
         }
       } catch (err: any) {
@@ -104,7 +105,7 @@ export const authService = {
     // 2. Demo fallback authentication
     const demo = DEMO_USERS[cleanEmail];
     if (demo && (demo.password === password || password === 'password123' || password === 'admin123')) {
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(demo.user));
+      if (typeof localStorage !== 'undefined') localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(demo.user));
       return { success: true, user: demo.user };
     }
 
@@ -117,7 +118,7 @@ export const authService = {
         role: 'marketer',
         company: 'Both',
       };
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(customUser));
+      if (typeof localStorage !== 'undefined') localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(customUser));
       return { success: true, user: customUser };
     }
 

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Person } from '../../types/masterDatabase';
 import { cleanJobTitle } from '../../shared/normalization';
+import { formatDateDisplay } from '../../shared/dateFormat';
 
 interface TimelineTabProps {
   candidate: Person;
@@ -165,7 +166,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({ candidate }) => {
 
                 <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
                   <Calendar className="w-3.5 h-3.5" />
-                  <span>{item.date}</span>
+                  <span>{formatDateDisplay(item.date)}</span>
                 </div>
               </div>
 

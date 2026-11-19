@@ -11,6 +11,101 @@
 
 import * as XLSX from 'xlsx';
 import { detectHeaderMapping, extractRowValues, CANONICAL_COLUMNS } from './columnMapper.js';
+import { parseScreeningQuestionsText, normalizeAnswer } from './screeningEngine.js';
+
+export const LINKEDIN_RECRUITER_STANDARD_COLUMNS = [
+  'First Name',
+  'Last Name',
+  'Email Address',
+  'Phone Number',
+  'General Location',
+  'ZIP Code',
+  'Headline',
+  'Current Title',
+  'Current Company',
+  'Current Position Start Date',
+  'Education Degree',
+  'Education Institution',
+  'Profile URL',
+  'Date Applied',
+  'Current Stage',
+  'Job ID',
+  'Job Title',
+  'Job URL',
+  'ATS Job ID',
+  'Minimum Salary',
+  'Maximum Salary',
+  'Currency Code',
+  'Compensation Period',
+  'Hiring Project ID',
+  'Hiring Project Title',
+  'Contract ID',
+  'Contract Name',
+  'Screening Questions',
+];
+
+export function isScreeningFragment(text: string): boolean {
+  const t = (text || '').trim();
+  if (!t) return false;
+  return (
+    t.startsWith(':') ||
+    t.startsWith('Language:') ||
+    t.startsWith('Please submit') ||
+    t.startsWith('Mobile phone') ||
+    t.startsWith('Are you legally') ||
+    t.startsWith('How many years') ||
+    t.startsWith('Do You Have a Green Card') ||
+    t.startsWith('Will you now') ||
+    /^\d+\.\s*how many years/i.test(t) ||
+    /^(yes|no)\b/i.test(t)
+  );
+}
+
+export function isLinkedInRecruiter28ColFormat(row: string[]): boolean {
+  if (!row || row.length < 20) return false;
+  const col2 = (row[2] || '').trim();
+  const col3 = (row[3] || '').trim();
+  const hasEmailAt2or3 = col2.includes('@') || col3.includes('@');
+  const hasLinkedInUrl = row.some((c) => /linkedin\.com\/(in|jobs)/i.test(c));
+  const hasCurrency = row.some((c) => /^(USD|CAD|EUR|GBP|INR)$/i.test(c.trim()));
+  return hasEmailAt2or3 && (hasLinkedInUrl || hasCurrency || row.length >= 24);
+}
+
+export function cleanAndHealGrid(rawGrid: string[][]): string[][] {
+  if (!rawGrid || rawGrid.length === 0) return [];
+
+  // Step 1: Remove leading orphaned fragments (e.g. from previous row continuation)
+  let startIndex = 0;
+  while (startIndex < rawGrid.length) {
+    const row = rawGrid[startIndex];
+    const joined = row.join(' ').trim();
+    const hasEmail = row.some((c) => c.includes('@') && c.includes('.'));
+    const isFrag = (row.length <= 3 && !hasEmail && isScreeningFragment(joined));
+    if (isFrag) {
+      startIndex++;
+    } else {
+      break;
+    }
+  }
+
+  const cleaned: string[][] = [];
+  for (let i = startIndex; i < rawGrid.length; i++) {
+    const row = rawGrid[i];
+    const joined = row.join(' ').trim();
+    const hasEmail = row.some((c) => c.includes('@') && c.includes('.'));
+    const isFrag = (row.length <= 3 && !hasEmail && isScreeningFragment(joined));
+
+    if (isFrag && cleaned.length > 0) {
+      // Continuation of previous row! Append to previous row's last cell (screening questions)
+      const prev = cleaned[cleaned.length - 1];
+      prev[prev.length - 1] = `${prev[prev.length - 1]} ${joined}`.trim();
+    } else if (row.some((c) => c.trim().length > 0)) {
+      cleaned.push(row);
+    }
+  }
+
+  return cleaned;
+}
 
 export interface ParseTabularResult {
   rows: Record<string, any>[];
@@ -85,10 +180,14 @@ export function parseTabularText(rawText: string): Record<string, any>[] {
  * Standard RFC-4180 compliant CSV / TSV parser that tracks quotes properly.
  */
 export function parseRfc4180(text: string): Record<string, any>[] {
-  const firstLine = text.split(/\r?\n/)[0] || '';
-  const tabCount = (firstLine.match(/\t/g) || []).length;
-  const commaCount = (firstLine.match(/,/g) || []).length;
-  const delimiter = tabCount >= commaCount ? '\t' : ',';
+  const hasTabs = text.includes('\t');
+  let delimiter = hasTabs ? '\t' : ',';
+  if (!hasTabs) {
+    const firstLine = text.split(/\r?\n/)[0] || '';
+    const tabCount = (firstLine.match(/\t/g) || []).length;
+    const commaCount = (firstLine.match(/,/g) || []).length;
+    delimiter = tabCount >= commaCount ? '\t' : ',';
+  }
 
   const rawGrid: string[][] = [];
   let currentRow: string[] = [];
@@ -323,10 +422,14 @@ export function parseRawGrid(text: string): string[][] {
   const cleanText = (text || '').trim();
   if (!cleanText) return [];
 
-  const firstLine = cleanText.split(/\r?\n/)[0] || '';
-  const tabCount = (firstLine.match(/\t/g) || []).length;
-  const commaCount = (firstLine.match(/,/g) || []).length;
-  const delimiter = tabCount >= commaCount ? '\t' : ',';
+  const hasTabs = cleanText.includes('\t');
+  let delimiter = hasTabs ? '\t' : ',';
+  if (!hasTabs) {
+    const firstLine = cleanText.split(/\r?\n/)[0] || '';
+    const tabCount = (firstLine.match(/\t/g) || []).length;
+    const commaCount = (firstLine.match(/,/g) || []).length;
+    delimiter = tabCount >= commaCount ? '\t' : ',';
+  }
 
   const grid: string[][] = [];
   let currentRow: string[] = [];
@@ -379,8 +482,8 @@ export function analyzePastedApplications(
   text: string,
   defaultJob?: { jobId?: string; jobTitle?: string }
 ): PastedDataAnalysis {
-  const grid = parseRawGrid(text);
-  if (grid.length === 0) {
+  const rawGrid = parseRawGrid(text);
+  if (rawGrid.length === 0) {
     return {
       totalRows: 0,
       validRows: 0,
@@ -389,6 +492,20 @@ export function analyzePastedApplications(
       headers: [],
       mappedFields: {},
       missingRequiredFields: ['Candidate Data'],
+      rows: [],
+    };
+  }
+
+  const grid = cleanAndHealGrid(rawGrid);
+  if (grid.length === 0) {
+    return {
+      totalRows: 0,
+      validRows: 0,
+      invalidRows: 0,
+      hasHeaders: false,
+      headers: [],
+      mappedFields: {},
+      missingRequiredFields: ['Valid Candidate Records'],
       rows: [],
     };
   }
@@ -417,6 +534,9 @@ export function analyzePastedApplications(
   if (hasHeaders) {
     headers = row0.map((h, i) => h.trim() || `Column ${i + 1}`);
     dataRows = grid.slice(1);
+  } else if (isLinkedInRecruiter28ColFormat(row0)) {
+    headers = LINKEDIN_RECRUITER_STANDARD_COLUMNS;
+    dataRows = grid;
   } else {
     dataRows = grid;
     // Check if exactly 8 columns (matching standard layout variations)
@@ -550,10 +670,24 @@ export function analyzePastedApplications(
     // Priority: If the recruiter explicitly selected a relevant job slot (defaultJob), assign all applicants to that slot!
     const jobId = (defaultJob?.jobId && defaultJob.jobId !== 'ALL') ? defaultJob.jobId : (normalized['jobId'] || 'PASTE-JOB');
     const jobTitle = (defaultJob?.jobId && defaultJob.jobId !== 'ALL' && defaultJob?.jobTitle) ? defaultJob.jobTitle : (normalized['jobTitle'] || defaultJob?.jobTitle || 'General Requisition');
-    const gc = normalized['greenCardCitizenAnswer'] || '';
-    const sponsor = normalized['sponsorshipAnswer'] || '';
-    const auth = normalized['usWorkAuthAnswer'] || '';
+    let gc = normalized['greenCardCitizenAnswer'] || '';
+    let sponsor = normalized['sponsorshipAnswer'] || '';
+    let auth = normalized['usWorkAuthAnswer'] || '';
     const rawQuestions = normalized['rawScreeningQuestions'] || '';
+
+    // If gc or sponsor answers were not separate columns, extract them from rawQuestions
+    if (rawQuestions && (!gc || !sponsor)) {
+      const parsedQ = parseScreeningQuestionsText(rawQuestions);
+      if (!gc && parsedQ.greenCardRaw) {
+        gc = normalizeAnswer(parsedQ.greenCardRaw);
+      }
+      if (!sponsor && parsedQ.sponsorshipRaw) {
+        sponsor = normalizeAnswer(parsedQ.sponsorshipRaw);
+      }
+      if (!auth && parsedQ.workAuthRaw) {
+        auth = normalizeAnswer(parsedQ.workAuthRaw);
+      }
+    }
 
     const errors: string[] = [];
     if (!name || name === 'Unnamed Applicant') {

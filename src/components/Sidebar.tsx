@@ -218,10 +218,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ? 'bg-[#2A3852] text-[#F7F9FD] border border-[#485B80] font-bold shadow-xs'
                     : 'text-[#B9C5D9] hover:text-[#F7F9FD] hover:bg-[#25334C]'
                 }`}
-                title="AaraTech: 21 Requisitions"
+                title="AaraTech: 21 Requisition Slots"
               >
                 <Building2 className={`w-3 h-3 shrink-0 ${recruitmentCompany === 'AaraTech' ? 'text-[#6E8BFF]' : 'text-[#8995A8]'}`} />
-                <span>AaraTech (21)</span>
+                <span>AaraTech (21 Slots)</span>
               </button>
               <button
                 type="button"
@@ -231,10 +231,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ? 'bg-[#2A3852] text-[#F7F9FD] border border-[#485B80] font-bold shadow-xs'
                     : 'text-[#B9C5D9] hover:text-[#F7F9FD] hover:bg-[#25334C]'
                 }`}
-                title="ClinisolTech: 10 Requisitions"
+                title="ClinisolTech: 10 Requisition Slots"
               >
                 <Stethoscope className={`w-3 h-3 shrink-0 ${recruitmentCompany === 'ClinisolTech' ? 'text-[#10B981]' : 'text-[#8995A8]'}`} />
-                <span>ClinisolTech (10)</span>
+                <span>ClinisolTech (10 Slots)</span>
               </button>
             </div>
           )}

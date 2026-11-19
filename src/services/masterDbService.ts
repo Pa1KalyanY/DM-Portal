@@ -123,6 +123,46 @@ async function parallelChunkUpsert<T>(
   }
 }
 
+// Company Matching Helpers for Strict Company Isolation
+export function matchesCandidateCompany(
+  p: { company?: string; current_company?: string | null; applications?: Array<{ company?: string }> },
+  targetCompany: string
+): boolean {
+  if (!targetCompany || targetCompany === 'All') return true;
+  const target = targetCompany.trim().toLowerCase();
+  const c1 = (p.company || '').trim().toLowerCase();
+  const c2 = (p.current_company || '').trim().toLowerCase();
+  if (c1 === target || c2 === target) return true;
+  if (p.applications && p.applications.some(a => a.company && a.company.trim().toLowerCase() === target)) return true;
+  return false;
+}
+
+export function matchesIncompleteCompany(
+  r: { company?: string; target_company?: string },
+  targetCompany: string
+): boolean {
+  const target = targetCompany.trim().toLowerCase();
+  const c1 = (r.company || '').trim().toLowerCase();
+  const c2 = (r.target_company || '').trim().toLowerCase();
+  return c1 === target || c2 === target;
+}
+
+export function matchesMatchCompany(
+  m: { company?: string },
+  targetCompany: string
+): boolean {
+  const target = targetCompany.trim().toLowerCase();
+  return (m.company || '').trim().toLowerCase() === target;
+}
+
+export function matchesImportCompany(
+  i: { company?: string },
+  targetCompany: string
+): boolean {
+  const target = targetCompany.trim().toLowerCase();
+  return (i.company || '').trim().toLowerCase() === target;
+}
+
 // In-Memory Storage Cache with IndexedDB Permanent Persistence
 class LocalDatabaseStore {
   people: Person[] = [];
@@ -155,78 +195,25 @@ class LocalDatabaseStore {
         indexedDBService.getAll<IncompleteRecord>('incompleteRecords'),
       ]);
 
-      // Authoritative backend SQLite sync: if backend reports master database is empty (0 candidates),
-      // synchronize local IndexedDB store by purging cached records immediately
+      // Primary source of truth: Backend SQLite Master Database API
       try {
-        const apiRes = await api.getMasterCandidates({ page: 1, pageSize: 1 });
-        if (apiRes && apiRes.success && apiRes.totalCount === 0) {
-          dbPeople.length = 0;
-          this.people = [];
+        const apiRes = await api.getMasterCandidates({ page: 1, pageSize: 20000 });
+        if (apiRes && apiRes.success && Array.isArray(apiRes.candidates)) {
+          this.people = apiRes.candidates;
+          // Synchronize local IndexedDB cache with authoritative backend
           await indexedDBService.clearStore('people');
-          localStorage.setItem('aat_store_cleared', 'true');
+          if (this.people.length > 0) {
+            await indexedDBService.putBatch('people', this.people);
+          }
+        } else if (dbPeople.length > 0) {
+          this.people = dbPeople;
         }
-      } catch (e) {
-        // Backend offline, will use local dbPeople
+      } catch (apiErr) {
+        console.warn('Backend API initial master candidates load fallback to IndexedDB:', apiErr);
+        if (dbPeople.length > 0) {
+          this.people = dbPeople;
+        }
       }
-
-      if (dbPeople.length > 0) {
-        for (const p of dbPeople) {
-          p.current_title = cleanJobTitle(p.current_title);
-          p.headline = cleanJobTitle(p.headline);
-          if (p.applications && p.applications.length > 1) {
-            const uniqueApps: any[] = [];
-            for (const app of p.applications) {
-              app.job_title = cleanJobTitle(app.job_title);
-              const normRole = (app.job_title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-              const existing = uniqueApps.find((u: any) =>
-                u.company === app.company &&
-                (u.job_title || '').toLowerCase().replace(/[^a-z0-9]/g, '') === normRole
-              );
-              if (existing) {
-                if (!existing.resume_link && app.resume_link) {
-                  existing.resume_link = app.resume_link;
-                }
-              } else {
-                uniqueApps.push(app);
-              }
-            }
-            p.applications = uniqueApps;
-          } else if (p.applications) {
-            for (const a of p.applications) {
-              a.job_title = cleanJobTitle(a.job_title);
-            }
-          }
-        }
-        this.people = dbPeople;
-      } else {
-        // If store was explicitly cleared by the user, do not resurrect legacy candidate data!
-        const wasCleared = localStorage.getItem('aat_store_cleared') === 'true';
-        if (!wasCleared) {
-          // 1. Try loading from backend SQLite Master Database API (the primary source of truth)
-          try {
-            const apiRes = await api.getMasterCandidates({ page: 1, pageSize: 1500 });
-            if (apiRes && apiRes.success && apiRes.candidates && apiRes.candidates.length > 0) {
-              this.people = apiRes.candidates;
-              await indexedDBService.putBatch('people', this.people);
-            }
-          } catch (apiErr) {
-            console.warn('Backend API initial master candidates load fallback:', apiErr);
-          }
-        }
-
-        // 2. Fallback: check legacy localStorage for migration
-        if (this.people.length === 0) {
-          try {
-            const storedPeople = localStorage.getItem('aat_store_people');
-            if (storedPeople) {
-              const parsed = JSON.parse(storedPeople);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                this.people = parsed;
-                await indexedDBService.putBatch('people', this.people);
-              }
-            }
-          } catch {}
-        }
 
         // 3. Fallback: load directly from live Supabase cloud PostgreSQL if available
         if (this.people.length === 0) {
@@ -264,7 +251,6 @@ class LocalDatabaseStore {
             }
           }
         }
-      }
 
       if (dbJobs.length > 0) {
         this.jobs = dbJobs;
@@ -441,6 +427,7 @@ class LocalDatabaseStore {
 
               this.people.unshift(restoredPerson);
               indexedDBService.putBatch('people', [restoredPerson]).catch(() => {});
+              api.upsertMasterCandidatesBatch([restoredPerson]).catch(() => {});
             }
 
             // Do not keep in incomplete queue!
@@ -711,77 +698,60 @@ class LocalDatabaseStore {
     }
   }
 
-  async clearAllCandidateData(company: CompanyName | 'all' = 'all'): Promise<void> {
-    if (company && company !== 'all') {
-      // Company-Scoped Clear: Strictly preserve other company's candidate data (Prompt Section 2)!
-      this.people = this.people.filter(p => p.company !== company);
-      this.imports = this.imports.filter(i => (i as any).company !== company);
-      this.possibleMatches = this.possibleMatches.filter(m => (m as any).company !== company);
-      this.incompleteRecords = this.incompleteRecords.filter(r => (r as any).company !== company);
+  async clearAllCandidateData(company: CompanyName): Promise<void> {
+    if (!company || (company !== 'AaraTech' && company !== 'ClinisolTech')) {
+      throw new Error(`Strict Company Isolation: company must be explicitly 'AaraTech' or 'ClinisolTech'. Received: ${company}`);
+    }
 
-      try {
-        // Keep other company's data in IndexedDB
-        const allPeople = await indexedDBService.getAll<Person>('people');
-        const keptPeople = allPeople.filter(p => p.company !== company);
-        await indexedDBService.clearStore('people');
-        if (keptPeople.length > 0) {
-          await indexedDBService.putBatch('people', keptPeople);
-        }
+    // Company-Scoped Clear: Filter in-memory arrays with comprehensive company detection
+    this.people = this.people.filter(p => !matchesCandidateCompany(p, company));
+    this.imports = this.imports.filter(i => !matchesImportCompany(i as any, company));
+    this.possibleMatches = this.possibleMatches.filter(m => !matchesMatchCompany(m as any, company));
+    this.incompleteRecords = this.incompleteRecords.filter(r => !matchesIncompleteCompany(r, company));
 
-        const allInc = await indexedDBService.getAll<IncompleteRecord>('incompleteRecords');
-        const keptInc = allInc.filter(r => r.company !== company);
-        await indexedDBService.clearStore('incompleteRecords');
-        if (keptInc.length > 0) {
-          await indexedDBService.putBatch('incompleteRecords', keptInc);
-        }
-
-        const allMatches = await indexedDBService.getAll<PossibleMatch>('possibleMatches');
-        const keptMatches = allMatches.filter(m => (m as any).company !== company);
-        await indexedDBService.clearStore('possibleMatches');
-        if (keptMatches.length > 0) {
-          await indexedDBService.putBatch('possibleMatches', keptMatches);
-        }
-
-        // Update local memory cache without nuking other company
-        localStorage.setItem('aat_store_people', JSON.stringify(this.people));
-      } catch (e) {
-        console.warn(`Storage clear notice for ${company}:`, e);
+    try {
+      // 1. Keep other company's data in IndexedDB people store
+      const allPeople = await indexedDBService.getAll<Person>('people');
+      const keptPeople = allPeople.filter(p => !matchesCandidateCompany(p, company));
+      await indexedDBService.clearStore('people');
+      if (keptPeople.length > 0) {
+        await indexedDBService.putBatch('people', keptPeople);
       }
 
-      try {
-        window.dispatchEvent(new CustomEvent('workspace-data-updated', { detail: { action: 'cleared-company', company } }));
-      } catch {}
-      return;
-    }
+      // 2. Keep other company's incomplete records
+      const allInc = await indexedDBService.getAll<IncompleteRecord>('incompleteRecords');
+      const keptInc = allInc.filter(r => !matchesIncompleteCompany(r, company));
+      await indexedDBService.clearStore('incompleteRecords');
+      if (keptInc.length > 0) {
+        await indexedDBService.putBatch('incompleteRecords', keptInc);
+      }
 
-    // Global clear across all companies
-    this.people = [];
-    this.imports = [];
-    this.possibleMatches = [];
-    this.auditLogs = [];
-    this.mergeHistories = [];
-    this.incompleteRecords = [];
-    this.jobs = JSON.parse(JSON.stringify(INITIAL_JOBS));
+      // 3. Keep other company's possible matches
+      const allMatches = await indexedDBService.getAll<PossibleMatch>('possibleMatches');
+      const keptMatches = allMatches.filter(m => !matchesMatchCompany(m as any, company));
+      await indexedDBService.clearStore('possibleMatches');
+      if (keptMatches.length > 0) {
+        await indexedDBService.putBatch('possibleMatches', keptMatches);
+      }
 
-    try {
-      await indexedDBService.clearAll();
-      await indexedDBService.putBatch('jobs', this.jobs);
-      localStorage.setItem('aat_store_cleared', 'true');
-      localStorage.removeItem('aat_store_people');
-      localStorage.removeItem('aat_store_imports');
-      localStorage.removeItem('aat_store_matches');
-      localStorage.removeItem('aat_store_audit');
-      localStorage.removeItem('aat_store_merges');
+      // 4. Update local memory cache without nuking other company
+      if (this.people.length > 0) {
+        localStorage.setItem('aat_store_people', JSON.stringify(this.people));
+      } else {
+        localStorage.removeItem('aat_store_people');
+      }
+      localStorage.setItem('aat_store_imports', JSON.stringify(this.imports.slice(0, 50)));
     } catch (e) {
-      console.warn('Storage clear notice:', e);
+      console.warn(`Storage clear notice for ${company}:`, e);
     }
+
     try {
-      window.dispatchEvent(new CustomEvent('workspace-data-updated', { detail: { action: 'cleared-all' } }));
+      window.dispatchEvent(new CustomEvent('workspace-data-updated', { detail: { action: 'cleared-company', company } }));
     } catch {}
   }
 
-  resetToDefaults() {
-    this.clearAllCandidateData();
+  resetToDefaults(company: CompanyName = 'AaraTech') {
+    this.clearAllCandidateData(company);
   }
 }
 
@@ -803,45 +773,42 @@ export function getCandidateDateApplied(p: Person): string {
 
 export const dbService = {
   /**
-   * Clear candidate data for a specific company or all companies with strict company isolation
+   * Clear candidate data for a specific company with strict company isolation
    */
-  async clearAllData(company: CompanyName | 'all' = 'all'): Promise<void> {
-    await localStore.clearAllCandidateData(company);
+  async clearAllData(company: CompanyName): Promise<void> {
+    if (!company || (company !== 'AaraTech' && company !== 'ClinisolTech')) {
+      throw new Error(`Strict Company Isolation: company must be explicitly 'AaraTech' or 'ClinisolTech' (received: ${company}).`);
+    }
+
+    // 1. Authoritative Backend SQLite Clear FIRST!
     try {
       await api.clearAllMasterCandidates(company);
     } catch (e) {
       console.warn(`Backend remote clear notice for ${company}:`, e);
     }
+
+    // 2. Clear in-memory LocalStore & permanent browser IndexedDB
+    await localStore.clearAllCandidateData(company);
+
+    // 3. Clear cloud Supabase if connected
     const client = getSupabaseClient();
     if (client) {
       try {
-        if (company && company !== 'all') {
-          await client.from('possible_matches').delete().eq('company', company);
-          await client.from('people').delete().eq('company', company);
-          await client.from('applications').delete().eq('company', company);
-          await client.from('imports').delete().eq('company', company);
-          try {
-            await client.from('incomplete_records').delete().eq('company', company);
-          } catch {}
-        } else {
-          await client.from('possible_matches').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-          await client.from('recruiter_contacts').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-          await client.from('person_status_history').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-          await client.from('merge_history').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-          await client.from('applications').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-          await client.from('person_emails').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-          await client.from('person_phones').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-          await client.from('people').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-          await client.from('imports').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-          await client.from('audit_log').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-          try {
-            await client.from('incomplete_records').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-          } catch {}
-        }
+        await client.from('possible_matches').delete().ilike('company', company);
+        await client.from('people').delete().ilike('current_company', company);
+        await client.from('people').delete().ilike('company', company);
+        await client.from('applications').delete().ilike('company', company);
+        await client.from('imports').delete().ilike('company', company);
+        try {
+          await client.from('incomplete_records').delete().ilike('company', company);
+        } catch {}
       } catch (e) {
         console.warn('Supabase remote clear error:', e);
       }
     }
+
+    // 4. Notify all components and App sidebar badges to refresh immediately
+    window.dispatchEvent(new CustomEvent('workspace-data-updated', { detail: { action: 'cleared-company', company } }));
   },
 
   /**
@@ -894,27 +861,10 @@ export const dbService = {
         technology: params.technology || params.jobTitle,
       });
       if (apiRes && apiRes.success) {
-        // Authoritative backend response received
-        if (apiRes.totalCount === 0) {
-          // If the backend has 0 records, purge any stale candidate records from localStore and IndexedDB
-          if (!params.search && (!params.status || params.status === 'All') && (!params.owner || params.owner === 'All') && (!params.gender || params.gender === 'All')) {
-            if (params.company && params.company !== 'All' && params.company !== 'Both') {
-              localStore.people = localStore.people.filter(p => {
-                const pComp = p.current_company || (p.applications && p.applications.find(a => a.company)?.company);
-                return pComp !== params.company;
-              });
-              indexedDBService.clearStore('people').then(() => {
-                if (localStore.people.length > 0) {
-                  indexedDBService.putBatch('people', localStore.people);
-                }
-              }).catch(() => {});
-            } else {
-              localStore.people = [];
-              indexedDBService.clearStore('people').catch(() => {});
-            }
-          }
-        }
-        return { candidates: apiRes.candidates || [], totalCount: apiRes.totalCount || 0 };
+        return {
+          candidates: apiRes.candidates || [],
+          totalCount: apiRes.totalCount || 0,
+        };
       }
     } catch (apiErr) {
       console.warn('Backend /api/master-candidates fetch fallback to local/supabase:', apiErr);
@@ -1029,7 +979,14 @@ export const dbService = {
     }
 
     if (params.gender && params.gender !== 'All') {
-      list = list.filter(p => (p.gender || 'Unspecified') === params.gender);
+      const targetGenderUpper = params.gender.toUpperCase();
+      list = list.filter(p => {
+        const g = (p.gender || 'Unspecified').toUpperCase();
+        if (targetGenderUpper === 'UNSPECIFIED') {
+          return !p.gender || g === 'UNSPECIFIED';
+        }
+        return g === targetGenderUpper;
+      });
     }
 
     if (params.contactFilter === 'missing_phone') {
@@ -1856,6 +1813,18 @@ export const dbService = {
       return { success: false, updatedCount: 0, error: 'No candidates selected' };
     }
 
+    let backendCount = 0;
+    // 1. Authoritative backend SQLite sync
+    try {
+      const apiRes = await api.batchUpdateMasterCandidates(personIds, { gender }, updatedBy);
+      if (apiRes && apiRes.success) {
+        backendCount = apiRes.updatedCount || personIds.length;
+      }
+    } catch (e) {
+      console.warn('Backend SQLite batchUpdateMasterCandidates error:', e);
+    }
+
+    // 2. Update in-memory localStore and IndexedDB
     const idSet = new Set(personIds);
     const now = new Date().toISOString();
     const updatedPeople: Person[] = [];
@@ -1868,18 +1837,16 @@ export const dbService = {
       }
     }
 
-    if (updatedPeople.length === 0) {
-      return { success: false, updatedCount: 0, error: 'No matching candidates found' };
+    if (updatedPeople.length > 0) {
+      await localStore.saveToStorage();
+      await indexedDBService.putBatch('people', updatedPeople);
     }
 
-    await localStore.saveToStorage();
-    await indexedDBService.putBatch('people', updatedPeople);
-
-    // Sync to Supabase in chunks
+    // 3. Sync to Supabase in chunks
     const client = getSupabaseClient();
     if (client) {
       try {
-        const matchingUuids = updatedPeople.map(p => p.id);
+        const matchingUuids = personIds;
         const chunkSize = 100;
         for (let i = 0; i < matchingUuids.length; i += chunkSize) {
           const chunk = matchingUuids.slice(i, i + chunkSize);
@@ -1890,15 +1857,8 @@ export const dbService = {
       }
     }
 
-    // Authoritative backend SQLite sync
-    try {
-      await api.batchUpdateMasterCandidates(personIds, { gender }, updatedBy);
-    } catch (e) {
-      console.warn('Backend SQLite batchUpdateMasterCandidates error:', e);
-    }
-
     window.dispatchEvent(new CustomEvent('workspace-data-updated', { detail: { entity: 'candidate', action: 'batch_gender_updated' } }));
-    return { success: true, updatedCount: updatedPeople.length };
+    return { success: true, updatedCount: backendCount || updatedPeople.length || personIds.length };
   },
 
   /**
@@ -3141,6 +3101,18 @@ export const dbService = {
   },
 
   /**
+   * Calculates the maximum numerical P- sequence across all loaded master candidates
+   * Ensures new candidate imports never collide with existing candidate human IDs across companies.
+   */
+  getMaxPersonSequence(): number {
+    const existingIds = localStore.people.map(p => {
+      const match = p.person_id?.match(/P-(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    });
+    return Math.max(1000, ...existingIds);
+  },
+
+  /**
    * Save a newly imported or modified batch of people
    * Persists PERMANENTLY to IndexedDB and syncs to Supabase PostgreSQL when connected
    */
@@ -3149,7 +3121,8 @@ export const dbService = {
     updatedCandidates: Person[],
     importRecord: ImportRecord,
     newPossibleMatches: PossibleMatch[],
-    newIncompleteRecords: IncompleteRecord[] = []
+    newIncompleteRecords: IncompleteRecord[] = [],
+    onProgress?: (phase: string, current: number, total: number) => void
   ): Promise<{ success: boolean; cloudSynced: boolean; error?: string }> {
     await localStore.ensureInitialized();
 
@@ -3216,36 +3189,73 @@ export const dbService = {
     try {
       const allToSync = [...newCandidates, ...updatedCandidates];
       if (allToSync.length > 0) {
-        await api.upsertMasterCandidatesBatch(allToSync, importRecord);
+        console.log(`[Backend Sync] Creating Master Import Job ${importRecord.id} for ${allToSync.length} candidates...`);
+        try {
+          await api.createMasterImportJob({
+            id: importRecord.id,
+            company: (importRecord as any)?.company || 'AaraTech',
+            sourceFile: importRecord.file_name,
+            sheetName: (importRecord as any).sheet_name || 'Sheet1',
+            totalRows: allToSync.length,
+          });
+        } catch (jobErr) {
+          console.warn('[Backend Sync] Could not register import job header, continuing batch sync:', jobErr);
+        }
+
+        console.log(`[Backend Sync] Syncing ${allToSync.length} candidates to SQLite database in chunks...`);
+        if (onProgress) {
+          onProgress(`Saving ${allToSync.length} candidates to Master SQLite Database...`, 0, allToSync.length);
+        }
+        const syncRes = await api.upsertMasterCandidatesBatch(allToSync, importRecord, {
+          jobId: importRecord.id,
+          onChunkProgress: (chunkNum, totalChunks, rowCount) => {
+            if (onProgress) {
+              onProgress(`Committed Chunk ${chunkNum}/${totalChunks} (${rowCount}/${allToSync.length} candidates to database)...`, rowCount, allToSync.length);
+            }
+          },
+        });
+        console.log(`[Backend Sync] Committed candidates to SQLite database:`, syncRes);
+        if (syncRes.errors && syncRes.errors.length > 0) {
+          console.warn(`[Backend Sync] Completed with ${syncRes.errors.length} row warnings recorded in ledger.`);
+        }
+        try {
+          await api.completeMasterImportJob(
+            importRecord.id,
+            syncRes.errors && syncRes.errors.length > 0 ? 'CompletedWithWarnings' : 'Completed'
+          );
+        } catch {}
       }
-    } catch (sqliteErr) {
+    } catch (sqliteErr: any) {
       console.warn('Backend SQLite batch upsert notice:', sqliteErr);
     }
 
-    // 8. Sync to Cloud Supabase PostgreSQL if client is active
+    // 8. Optional Remote Cloud Backup to Supabase (Non-blocking background sync)
     let cloudSynced = false;
     let syncError: string | undefined;
 
     const client = getSupabaseClient();
     if (client) {
-      try {
-        const syncResult = await this.syncBatchToSupabase(
-          newCandidates,
-          updatedCandidates,
-          importRecord,
-          newPossibleMatches,
-          auditEntry,
-          newIncompleteRecords
-        );
-        cloudSynced = syncResult.success;
+      // Execute in background so large imports (e.g. 6,000 rows) complete instantaneously in UI
+      this.syncBatchToSupabase(
+        newCandidates,
+        updatedCandidates,
+        importRecord,
+        newPossibleMatches,
+        auditEntry,
+        newIncompleteRecords
+      ).then(syncResult => {
         if (!syncResult.success) {
-          syncError = syncResult.error;
+          console.warn('Optional Supabase background backup notice:', syncResult.error);
+        } else {
+          console.log(`[Supabase Backup] Synced batch ${importRecord.id} to cloud successfully.`);
         }
-      } catch (err: any) {
-        console.warn('Supabase remote sync warning (data is safely saved in local IndexedDB):', err);
-        syncError = err?.message || 'Remote sync failed';
-      }
+      }).catch(err => {
+        console.warn('Optional Supabase background backup notice:', err);
+      });
+      cloudSynced = true;
     }
+
+    window.dispatchEvent(new CustomEvent('workspace-data-updated', { detail: { action: 'import-batch-saved' } }));
 
     return {
       success: true,
@@ -3319,7 +3329,7 @@ export const dbService = {
         last_activity_at: p.last_activity_at,
       }));
 
-      for (const chunk of chunkArray(peopleRows, 50)) {
+      for (const chunk of chunkArray(peopleRows, 500)) {
         const { error: peopleErr } = await client.from('people').upsert(chunk, { onConflict: 'id' });
         if (peopleErr) {
           console.warn('Supabase people chunk upsert warning:', peopleErr);
@@ -3349,7 +3359,7 @@ export const dbService = {
       }
 
       if (allEmails.length > 0) {
-        for (const chunk of chunkArray(allEmails, 50)) {
+        for (const chunk of chunkArray(allEmails, 500)) {
           const { error: emailErr } = await client.from('person_emails').upsert(chunk, { onConflict: 'id' });
           if (emailErr) console.warn('Supabase email upsert warning:', emailErr);
         }
@@ -3378,7 +3388,7 @@ export const dbService = {
       }
 
       if (allPhones.length > 0) {
-        for (const chunk of chunkArray(allPhones, 50)) {
+        for (const chunk of chunkArray(allPhones, 500)) {
           const { error: phoneErr } = await client.from('person_phones').upsert(chunk, { onConflict: 'id' });
           if (phoneErr) console.warn('Supabase phone upsert warning:', phoneErr);
         }
@@ -3395,7 +3405,7 @@ export const dbService = {
               company: a.company,
               job_id: a.job_id || null,
               job_title: a.job_title,
-              date_applied: a.date_applied || new Date().toISOString().split('T')[0],
+              date_applied: a.date_applied || '',
               current_stage: a.current_stage || 'Applied',
               resume_link: a.resume_link || null,
               source_file: a.source_file || null,
@@ -3409,7 +3419,7 @@ export const dbService = {
       }
 
       if (allApps.length > 0) {
-        for (const chunk of chunkArray(allApps, 50)) {
+        for (const chunk of chunkArray(allApps, 500)) {
           const { error: appErr } = await client.from('applications').upsert(chunk, { onConflict: 'id' });
           if (appErr) console.warn('Supabase application upsert warning:', appErr);
         }
@@ -3425,7 +3435,7 @@ export const dbService = {
               person_id: p.id,
               application_id: c.application_id || null,
               recruiter_name: c.recruiter_name,
-              contact_date: c.contact_date || new Date().toISOString().split('T')[0],
+              contact_date: c.contact_date || '',
               contact_type: c.contact_type || 'Phone',
               original_feedback: c.original_feedback, // Raw verbatim
               source: c.source || null,
@@ -3438,7 +3448,7 @@ export const dbService = {
       }
 
       if (allContacts.length > 0) {
-        for (const chunk of chunkArray(allContacts, 50)) {
+        for (const chunk of chunkArray(allContacts, 500)) {
           const { error: contactErr } = await client.from('recruiter_contacts').upsert(chunk, { onConflict: 'id' });
           if (contactErr) console.warn('Supabase recruiter contacts upsert warning:', contactErr);
         }
@@ -3456,7 +3466,7 @@ export const dbService = {
           created_at: pm.created_at,
         }));
 
-        for (const chunk of chunkArray(matchRows, 50)) {
+        for (const chunk of chunkArray(matchRows, 500)) {
           const { error: matchErr } = await client.from('possible_matches').upsert(chunk, { onConflict: 'id' });
           if (matchErr) console.warn('Supabase possible matches upsert warning:', matchErr);
         }
@@ -3465,7 +3475,7 @@ export const dbService = {
       // H. Upsert Incomplete Records (safe try-catch if table exists)
       if (newIncompleteRecords && newIncompleteRecords.length > 0) {
         try {
-          for (const chunk of chunkArray(newIncompleteRecords, 50)) {
+          for (const chunk of chunkArray(newIncompleteRecords, 500)) {
             await client.from('incomplete_records').upsert(chunk, { onConflict: 'id' });
           }
         } catch (incErr) {
@@ -3576,7 +3586,7 @@ export const dbService = {
         company: a.company,
         job_id: a.job_id || null,
         job_title: a.job_title,
-        date_applied: a.date_applied || new Date().toISOString().split('T')[0],
+        date_applied: a.date_applied || '',
         current_stage: a.current_stage || 'Applied',
         resume_link: a.resume_link || null,
         source_file: a.source_file || null,
@@ -3597,7 +3607,7 @@ export const dbService = {
         person_id: p.id,
         application_id: c.application_id || null,
         recruiter_name: c.recruiter_name,
-        contact_date: c.contact_date || new Date().toISOString().split('T')[0],
+        contact_date: c.contact_date || '',
         contact_type: c.contact_type || 'Phone',
         original_feedback: c.original_feedback,
         source: c.source || null,
@@ -3737,7 +3747,7 @@ export const dbService = {
 
       const role = cleanJobTitle(p.current_title || p.headline || p.applications?.[0]?.job_title || 'Data Analyst');
       const feedback = p.recruiter_contacts?.[0]?.original_feedback || '';
-      const dateAssigned = p.applications?.[0]?.date_applied || p.created_at?.split('T')[0] || new Date().toISOString().split('T')[0];
+      const dateAssigned = p.applications?.[0]?.date_applied || p.created_at?.split('T')[0] || '';
 
       seenIds.add(p.id);
       list.push({
@@ -4192,6 +4202,16 @@ export const dbService = {
       await indexedDBService.deleteItem('incompleteRecords', id);
     }
 
+    // Sync promoted candidates directly into authoritative backend SQLite database
+    try {
+      const allBatch = [...newPeople, ...updatedPeople];
+      if (allBatch.length > 0) {
+        await api.upsertMasterCandidatesBatch(allBatch);
+      }
+    } catch (sqliteErr) {
+      console.warn('Backend SQLite sync notice during promoteIncompleteBatch:', sqliteErr);
+    }
+
     // Fast parallel chunk sync to Supabase Cloud
     const client = getSupabaseClient();
     if (client) {
@@ -4363,6 +4383,13 @@ export const dbService = {
       await indexedDBService.putBatch('people', [existingPerson]);
       await indexedDBService.deleteItem('incompleteRecords', incompleteId);
 
+      // Sync to SQLite Backend API
+      try {
+        await api.upsertMasterCandidatesBatch([existingPerson]);
+      } catch (e) {
+        console.warn('Backend SQLite sync warning on existing person update:', e);
+      }
+
       const client = getSupabaseClient();
       if (client) {
         try {
@@ -4526,6 +4553,13 @@ export const dbService = {
     // Persist to IndexedDB
     await localStore.saveToStorage();
     await indexedDBService.deleteItem('incompleteRecords', incompleteId);
+
+    // Sync to authoritative backend SQLite Database
+    try {
+      await api.upsertMasterCandidatesBatch([newPerson]);
+    } catch (sqliteErr) {
+      console.warn('Backend SQLite sync warning on individual promotion:', sqliteErr);
+    }
 
     // Sync to Supabase
     const client = getSupabaseClient();

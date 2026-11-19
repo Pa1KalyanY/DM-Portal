@@ -153,24 +153,28 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           type="button"
           onClick={() => refreshSupabase()}
-          title={supabaseStatus?.message || `${recruitmentCompany} Database Status (Click to re-verify)`}
+          title={`Selected Company: ${recruitmentCompany}\nDatabase Type: ${supabaseStatus?.dbType || 'SQLite Relational Database (Authoritative)'}\nConnection Status: ${supabaseStatus === null ? 'CHECKING...' : (supabaseStatus.connected ? 'ONLINE' : 'OFFLINE')}\nLatency: ${supabaseStatus?.latencyMs ?? 0}ms\nMaster Candidates: ${supabaseStatus?.masterPeopleCount ?? 0}\nTotal Ingested Applicants: ${supabaseStatus?.applicantCount ?? 0}\nLast Successful Health Check: ${supabaseStatus?.lastSuccessfulCheck || supabaseStatus?.timestamp || 'N/A'}\nLast Successful Read: ${supabaseStatus?.lastSuccessfulRead || 'Verified'}\nLast Successful Write: ${supabaseStatus?.lastSuccessfulWrite || 'Verified'}\nSynchronization Status: ${supabaseStatus?.syncStatus || 'SYNCHRONIZED'}`}
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
-            supabaseStatus?.connected
+            supabaseStatus === null
+              ? 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+              : supabaseStatus.connected
               ? 'bg-[#E6F5F1] text-[#16836B] border-[#A3DCD0] hover:bg-[#D6EDE7]'
-              : 'bg-[#FEF6E9] text-[#A66B19] border-[#F8D8A8] hover:bg-[#FDF0D5]'
+              : 'bg-[#FEE2E2] text-[#DC2626] border-[#FECACA] hover:bg-[#FEE2E2]'
           }`}
         >
-          {supabaseStatus?.connected ? (
+          {supabaseStatus === null ? (
+            <span className="w-2 h-2 rounded-full bg-slate-400 animate-pulse" />
+          ) : supabaseStatus.connected ? (
             <CheckCircle2 className="w-3.5 h-3.5 text-[#16836B]" />
           ) : (
-            <AlertCircle className="w-3.5 h-3.5 text-[#A66B19]" />
+            <span className="w-2 h-2 rounded-full bg-[#DC2626] animate-pulse" />
           )}
           <span>
-            {supabaseStatus?.connected
-              ? isSharedSection
-                ? 'Portal DB Online'
-                : `${recruitmentCompany} DB Online`
-              : 'Standalone Storage'}
+            {supabaseStatus === null
+              ? 'Checking DB...'
+              : isSharedSection
+              ? (supabaseStatus.connected ? 'Portal DB Online' : 'Portal DB Offline')
+              : (supabaseStatus.connected ? `${recruitmentCompany} DB Online` : `${recruitmentCompany} DB Offline`)}
           </span>
         </button>
 

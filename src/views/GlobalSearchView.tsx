@@ -14,6 +14,7 @@ import {
 import { dbService } from '../services/masterDbService';
 import { Person } from '../types/masterDatabase';
 import { formatPureDigitsPhone } from '../shared/normalization';
+import { formatDateDisplay } from '../shared/dateFormat';
 
 interface GlobalSearchViewProps {
   initialQuery?: string;
@@ -185,7 +186,7 @@ export const GlobalSearchView: React.FC<GlobalSearchViewProps> = ({
                     Owner: <strong className="text-slate-800">{person.current_owner || 'Unassigned'}</strong>
                   </div>
                   <div>
-                    Last Activity: <span className="font-mono">{new Date(person.last_activity_at).toLocaleDateString()}</span>
+                    Last Activity: <span className="font-mono">{formatDateDisplay(person.last_activity_at, 'N/A')}</span>
                   </div>
                   <span className="text-xs font-semibold text-blue-600 flex items-center gap-1 mt-1">
                     <span>View Profile</span>

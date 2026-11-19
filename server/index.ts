@@ -30,7 +30,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3000', 'http://localhost:3001'],
+  origin: true,
   credentials: true,
 }));
 app.use(express.json({ limit: '50mb' }));
@@ -552,7 +552,11 @@ app.post('/api/process-files', upload.array('files', 50), async (req: Request, r
     dbService.createImport(importRecord, company, applicationDate, jobSlots);
     dbService.insertApplicantsBatch(allApplicantsToInsert, company, importId, applicationDate);
 
-    // Note: Promotion to Master Candidate Database is an explicit recruiter action via POST /api/transfer-passed-to-master (Phase 2)
+    // Fetch authoritative post-screening, post-duplicate counts
+    const postCounts = dbService.getApplicantCountsByStatus({
+      company,
+      batchId: importId,
+    });
 
     dbService.addAuditLog({
       id: `audit-${Date.now()}`,
@@ -560,7 +564,7 @@ app.post('/api/process-files', upload.array('files', 50), async (req: Request, r
       user: uploadedBy,
       action: 'File Batch Import',
       reason: `Uploaded ${files.length} file(s) with ${totalApplicants} applicants (${derivedBatchName}) in workspace ${company}.`,
-      details: `Import ${importCode} (${derivedBatchName}) for ${company}: ${totalPassed} PASS, ${totalFailed} FAIL, ${totalManualReview} MANUAL REVIEW, ${totalErrors} ERRORS.`,
+      details: `Import ${importCode} (${derivedBatchName}) for ${company}: ${postCounts.pass} UNIQUE PASSED, ${postCounts.fail} FAIL, ${postCounts.review} MANUAL REVIEW, ${postCounts.duplicate} DUPLICATES.`,
     });
 
     res.json({
@@ -571,9 +575,10 @@ app.post('/api/process-files', upload.array('files', 50), async (req: Request, r
         batchName: derivedBatchName,
         filesProcessed: files.length,
         totalApplicants,
-        passed: totalPassed,
-        failed: totalFailed,
-        manualReview: totalManualReview,
+        passed: postCounts.pass,
+        failed: postCounts.fail,
+        manualReview: postCounts.review,
+        duplicates: postCounts.duplicate,
         errors: totalErrors,
       },
     });
@@ -865,7 +870,11 @@ app.post('/api/process-pasted-data', async (req: Request, res: Response): Promis
     dbService.createImport(importRecord, finalCompany, applicationDate, jobSlots);
     dbService.insertApplicantsBatch(allApplicantsToInsert, finalCompany, importId, applicationDate);
 
-    // Note: Promotion to Master Candidate Database is an explicit recruiter action via POST /api/transfer-passed-to-master (Phase 2)
+    // Fetch authoritative post-screening, post-duplicate counts
+    const postCounts = dbService.getApplicantCountsByStatus({
+      company: finalCompany,
+      batchId: importId,
+    });
 
     dbService.addAuditLog({
       id: `audit-${Date.now()}`,
@@ -873,7 +882,7 @@ app.post('/api/process-pasted-data', async (req: Request, res: Response): Promis
       user,
       action: 'Clipboard Paste Import',
       reason: `Direct clipboard paste of ${allApplicantsToInsert.length} applicants (${importName}) in ${finalCompany}.`,
-      details: `Import ${importCode} (${importName}) for ${finalCompany}: ${totalPassed} PASS, ${totalFailed} FAIL, ${totalManualReview} MANUAL REVIEW, ${totalErrors} invalid/errors.`,
+      details: `Import ${importCode} (${importName}) for ${finalCompany}: ${postCounts.pass} UNIQUE PASSED, ${postCounts.fail} FAIL, ${postCounts.review} MANUAL REVIEW, ${postCounts.duplicate} DUPLICATES.`,
     });
 
     res.json({
@@ -884,14 +893,33 @@ app.post('/api/process-pasted-data', async (req: Request, res: Response): Promis
         batchName: importName,
         filesProcessed: 1,
         totalApplicants: allApplicantsToInsert.length,
-        passed: totalPassed,
-        failed: totalFailed,
-        manualReview: totalManualReview,
+        passed: postCounts.pass,
+        failed: postCounts.fail,
+        manualReview: postCounts.review,
+        duplicates: postCounts.duplicate,
         errors: totalErrors,
       },
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// 4B. AUTHORITATIVE DATABASE HEALTH & COMPANY CONNECTION CHECK
+// -------------------------------------------------------------
+app.get('/api/health', (req: Request, res: Response): void => {
+  try {
+    const rawCompany = (req.query.company as string) || (req.headers['x-company'] as string) || 'ClinisolTech';
+    const company = (rawCompany === 'AaraTech' || rawCompany === 'ClinisolTech') ? rawCompany : 'ClinisolTech';
+    const health = dbService.checkDatabaseHealth(company);
+    res.json(health);
+  } catch (err: any) {
+    res.status(500).json({
+      status: 'OFFLINE',
+      connected: false,
+      error: err.message,
+    });
   }
 });
 
@@ -913,8 +941,10 @@ app.get('/api/dashboard', (req: Request, res: Response): void => {
 // -------------------------------------------------------------
 app.get('/api/applicants', (req: Request, res: Response): void => {
   try {
+    dbService.autoRotateDailyBatchesEST();
     const company = (req.query.company as any) || (req.headers['x-company'] as any) || undefined;
     const batchId = (req.query.batchId as string) || (req.query.importId as string) || undefined;
+    const viewMode = (req.query.viewMode as string) || undefined;
     const applicationDate = (req.query.applicationDate as string) || undefined;
     const startDate = (req.query.startDate as string) || undefined;
     const endDate = (req.query.endDate as string) || undefined;
@@ -934,6 +964,7 @@ app.get('/api/applicants', (req: Request, res: Response): void => {
       jobTitle: (req.query.jobTitle as string) || undefined,
       company: company as string,
       batchId,
+      viewMode,
       applicationDate,
       startDate,
       endDate,
@@ -948,7 +979,7 @@ app.get('/api/applicants', (req: Request, res: Response): void => {
       sortOrder: (req.query.sortOrder as 'asc' | 'desc') || 'desc',
     };
 
-    const result = dbService.getApplicants(params);
+    const result = dbService.getApplicants(params as any);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -958,8 +989,10 @@ app.get('/api/applicants', (req: Request, res: Response): void => {
 // 5B. GET ALL APPLICANT IDS (For selecting all applicants across pages)
 app.get('/api/applicants/all-ids', (req: Request, res: Response): void => {
   try {
+    dbService.autoRotateDailyBatchesEST();
     const company = (req.query.company as any) || (req.headers['x-company'] as any) || undefined;
     const batchId = (req.query.batchId as string) || (req.query.importId as string) || undefined;
+    const viewMode = (req.query.viewMode as string) || undefined;
     const applicationDate = (req.query.applicationDate as string) || undefined;
     const isDuplicate = req.query.isDuplicate !== undefined ? (req.query.isDuplicate === 'true' || req.query.isDuplicate === '1') : undefined;
     const assignedRecruiter = (req.query.assignedRecruiter as string) || undefined;
@@ -974,6 +1007,7 @@ app.get('/api/applicants/all-ids', (req: Request, res: Response): void => {
       jobTitle: (req.query.jobTitle as string) || undefined,
       company: company as string,
       batchId,
+      viewMode,
       applicationDate,
       isDuplicate,
       assignedRecruiter,
@@ -996,8 +1030,10 @@ app.get('/api/applicants/all-ids', (req: Request, res: Response): void => {
 // 5C. GET APPLICANT TAB COUNTS (Exact breakdown across Passed, Manual Review, Failed, All Records)
 app.get('/api/applicants/tab-counts', (req: Request, res: Response): void => {
   try {
+    dbService.autoRotateDailyBatchesEST();
     const company = (req.query.company as any) || (req.headers['x-company'] as any) || undefined;
     const batchId = (req.query.batchId as string) || (req.query.importId as string) || undefined;
+    const viewMode = (req.query.viewMode as string) || undefined;
     const applicationDate = (req.query.applicationDate as string) || undefined;
     const startDate = (req.query.startDate as string) || undefined;
     const endDate = (req.query.endDate as string) || undefined;
@@ -1011,6 +1047,7 @@ app.get('/api/applicants/tab-counts', (req: Request, res: Response): void => {
     const counts = dbService.getApplicantTabCounts({
       company,
       batchId,
+      viewMode,
       applicationDate,
       startDate,
       endDate,
@@ -1020,7 +1057,7 @@ app.get('/api/applicants/tab-counts', (req: Request, res: Response): void => {
       nameMatchCategory,
       normalizedRole,
       isDuplicate,
-    });
+    } as any);
 
     res.json(counts);
   } catch (err: any) {
@@ -1290,6 +1327,7 @@ app.patch('/api/jobs/:jobId', (req: Request, res: Response): void => {
 // -------------------------------------------------------------
 app.get('/api/imports', (req: Request, res: Response): void => {
   try {
+    dbService.autoRotateDailyBatchesEST();
     const company = (req.query.company as any) || (req.headers['x-company'] as any) || undefined;
     const limit = parseInt(req.query.limit as string) || 100;
     const imports = dbService.getImports(limit, company);
@@ -1305,25 +1343,30 @@ app.get('/api/imports', (req: Request, res: Response): void => {
 app.post(['/api/batches/:id/clear', '/api/clear-current-batch'], (req: Request, res: Response): void => {
   try {
     const batchId = (req.params.id as string) || (req.body.batchId as string);
-    const company = (req.body.company as any) || (req.headers['x-company'] as any) || 'AaraTech';
+    const rawCompany = (req.body.company as any) || (req.headers['x-company'] as any) || 'ClinisolTech';
+    const company = (rawCompany === 'AaraTech' || rawCompany === 'ClinisolTech') ? rawCompany : 'ClinisolTech';
     const purgeRecords = req.body.purgeRecords === true || req.body.purgeRecords === 'true';
     const user = req.body.user || 'Recruiter Admin';
+    const applicationDate = req.body.applicationDate || (req.query?.applicationDate as string) || undefined;
 
     if (!batchId) {
       res.status(400).json({ error: 'batchId is required to clear active working batch.' });
       return;
     }
 
-    const result = dbService.clearWorkingBatch(batchId, company, purgeRecords);
+    if (batchId === 'ALL_TODAY' || batchId === 'ALL_DATE' || (batchId === 'ALL_SLOTS' && applicationDate)) {
+      const result = dbService.clearDailyBatches(company, applicationDate, purgeRecords, user);
+      res.json(result);
+      return;
+    }
 
-    dbService.addAuditLog({
-      id: `audit-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      user,
-      action: purgeRecords ? 'Purge Batch Records' : 'Unload Active Working Batch',
-      reason: `Cleared active working batch '${batchId}' in workspace ${company}.`,
-      details: `Batch ${batchId} cleared. Records purged: ${purgeRecords ? result.purgedApplicants : 0}. Permanent history and other batches preserved.`,
-    });
+    if (batchId === 'ALL_SLOTS' || batchId === 'ALL') {
+      const result = dbService.clearAllWorkingBatches(company, purgeRecords, user);
+      res.json(result);
+      return;
+    }
+
+    const result = dbService.clearWorkingBatch(batchId, company, purgeRecords);
 
     res.json({ success: true, ...result });
   } catch (err: any) {
@@ -1431,11 +1474,75 @@ app.get('/api/reports/analytics', (req: Request, res: Response): void => {
   }
 });
 
+app.get('/api/reports/drilldown-records', (req: Request, res: Response): void => {
+  try {
+    const company = (req.query.company as any) || (req.headers['x-company'] as any) || 'ClinisolTech';
+    const filterType = (req.query.filterType as any) || 'all';
+    const filterValue = (req.query.filterValue as string) || '';
+    const period = (req.query.period as any) || 'all';
+    const dateStr = (req.query.date as string) || (req.query.applicationDate as string);
+    const startDate = req.query.startDate as string;
+    const endDate = req.query.endDate as string;
+    const search = req.query.search as string;
+    const page = parseInt((req.query.page as string) || '1', 10);
+    const pageSize = parseInt((req.query.pageSize as string) || '20', 10);
+
+    const result = dbService.getReportDrilldownRecords({
+      company,
+      filterType,
+      filterValue,
+      period,
+      dateStr,
+      startDate,
+      endDate,
+      search,
+      page,
+      pageSize,
+    });
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/reports/cross-technology', (req: Request, res: Response): void => {
   try {
     const company = (req.query.company as any) || (req.headers['x-company'] as any) || 'AaraTech';
     const data = dbService.getCrossTechnologyAnalytics(company);
     res.json({ success: true, ...data });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/reports/available-months', (req: Request, res: Response): void => {
+  try {
+    const company = (req.query.company as any) || (req.headers['x-company'] as any) || 'ClinisolTech';
+    const months = dbService.getAvailableReportingMonths(company);
+    res.json({ success: true, months });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/reports/month-comparison', (req: Request, res: Response): void => {
+  try {
+    const company = (req.query.company as any) || (req.headers['x-company'] as any) || 'ClinisolTech';
+    const monthA = (req.query.monthA as string) || '2026-10';
+    const monthB = (req.query.monthB as string) || '2026-09';
+    const comparison = dbService.getMonthComparison(company, monthA, monthB);
+    res.json({ success: true, ...comparison });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/reports/month-summary', (req: Request, res: Response): void => {
+  try {
+    const company = (req.query.company as any) || (req.headers['x-company'] as any) || 'ClinisolTech';
+    const month = (req.query.month as string) || '2026-10';
+    const summary = dbService.getMonthSummary(company, month);
+    res.json({ success: true, summary });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -1784,10 +1891,83 @@ app.delete('/api/master-candidates/:id', (req: Request, res: Response): void => 
 
 app.post('/api/master-candidates/clear-all', (req: Request, res: Response): void => {
   try {
-    const company = (req.body?.company as any) || (req.query?.company as any) || 'all';
+    const company = (req.body?.company || req.query?.company || req.headers['x-company']) as string;
+    if (company !== 'AaraTech' && company !== 'ClinisolTech') {
+      res.status(400).json({ error: "Company must be explicitly specified as 'AaraTech' or 'ClinisolTech'. Global multi-company clearing is strictly prohibited." });
+      return;
+    }
     const user = req.body?.user || 'Recruiter Admin';
-    const result = dbService.clearAllMasterData(company, user);
+    const result = dbService.clearAllMasterData(company as 'AaraTech' | 'ClinisolTech', user);
     res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/master-candidates/import-jobs', (req: Request, res: Response): void => {
+  try {
+    const { id, company, sourceFile, sheetName, totalRows } = req.body;
+    if (!id || !company) {
+      res.status(400).json({ error: 'Job id and company are required' });
+      return;
+    }
+    const job = dbService.createMasterImportJob({ id, company, sourceFile, sheetName, totalRows });
+    res.json(job);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/master-candidates/import-jobs', (req: Request, res: Response): void => {
+  try {
+    const company = (req.query.company as string) || (req.headers['x-company'] as string) || undefined;
+    const jobs = dbService.getMasterImportJobs(company);
+    res.json(jobs);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/master-candidates/import-jobs/:id', (req: Request, res: Response): void => {
+  try {
+    const job = dbService.getMasterImportJob(req.params.id);
+    if (!job) {
+      res.status(404).json({ error: 'Import job not found' });
+      return;
+    }
+    res.json(job);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/master-candidates/import-jobs/:id/resume', (req: Request, res: Response): void => {
+  try {
+    const resumeInfo = dbService.getMasterImportResumeInfo(req.params.id);
+    if (!resumeInfo) {
+      res.status(404).json({ error: 'Import job not found' });
+      return;
+    }
+    res.json(resumeInfo);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/master-candidates/import-jobs/:id/errors', (req: Request, res: Response): void => {
+  try {
+    const errors = dbService.getMasterImportErrors(req.params.id);
+    res.json(errors);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/master-candidates/import-jobs/:id/complete', (req: Request, res: Response): void => {
+  try {
+    const { status, errorSummary } = req.body;
+    const job = dbService.completeMasterImportJob(req.params.id, status || 'Completed', errorSummary);
+    res.json(job);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -1797,10 +1977,14 @@ app.post('/api/master-candidates/batch-upsert', (req: Request, res: Response): v
   try {
     const people = req.body?.people || [];
     const importRecord = req.body?.importRecord;
-    const result = dbService.upsertMasterCandidatesBatch(people, importRecord);
+    const options = req.body?.options;
+    console.log(`[batch-upsert] Chunk ${options?.batchNumber} received with ${people.length} candidates. Job: ${options?.jobId}, rows: ${options?.startRow}-${options?.endRow}`);
+    const result = dbService.upsertMasterCandidatesBatch(people, importRecord, options);
+    console.log(`[batch-upsert] Chunk ${options?.batchNumber} completed. Upserted: ${result.upserted}, failed: ${result.failed}`);
     res.json(result);
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error(`[batch-upsert] Chunk ${req.body?.options?.batchNumber} FATAL ERROR:`, err);
+    res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 
@@ -2863,6 +3047,193 @@ app.post('/api/reference-matcher/export', (req: Request, res: Response): void =>
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`[API Server] LinkedIn Applicant Screening API running on http://localhost:${PORT}`);
+// -------------------------------------------------------------
+// DIGITAL MARKETING ENTERPRISE PERSISTENCE ENDPOINTS
+// -------------------------------------------------------------
+app.get('/api/marketing/members', (_req: Request, res: Response): void => {
+  try {
+    const members = dbService.getMarketingMembers();
+    res.json(members);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
+
+app.post('/api/marketing/members', (req: Request, res: Response): void => {
+  try {
+    const member = req.body;
+    dbService.upsertMarketingMember(member);
+    res.json({ success: true, member });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/marketing/attendance', (req: Request, res: Response): void => {
+  try {
+    const company = req.query.company as string | undefined;
+    const date = req.query.date as string | undefined;
+    const attendance = dbService.getMarketingAttendance(company, date);
+    res.json(attendance);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/marketing/attendance', (req: Request, res: Response): void => {
+  try {
+    const record = req.body;
+    dbService.upsertMarketingAttendance(record);
+    res.json({ success: true, record });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/marketing/tasks', (req: Request, res: Response): void => {
+  try {
+    const company = req.query.company as string | undefined;
+    const tasks = dbService.getMarketingTasks(company);
+    res.json(tasks);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/marketing/tasks', (req: Request, res: Response): void => {
+  try {
+    const task = req.body;
+    dbService.upsertMarketingTask(task);
+    res.json({ success: true, task });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/marketing/tasks/:id', (req: Request, res: Response): void => {
+  try {
+    const { id } = req.params;
+    dbService.deleteMarketingTask(id);
+    res.json({ success: true, id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/marketing/posts', (req: Request, res: Response): void => {
+  try {
+    const company = req.query.company as string | undefined;
+    const posts = dbService.getMarketingPosts(company);
+    res.json(posts);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/marketing/posts', (req: Request, res: Response): void => {
+  try {
+    const post = req.body;
+    dbService.upsertMarketingPost(post);
+    res.json({ success: true, post });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/marketing/posts/:id', (req: Request, res: Response): void => {
+  try {
+    const { id } = req.params;
+    dbService.deleteMarketingPost(id);
+    res.json({ success: true, id });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/marketing/reports', (req: Request, res: Response): void => {
+  try {
+    const company = req.query.company as string | undefined;
+    const date = req.query.date as string | undefined;
+    const reports = dbService.getMarketingReports(company, date);
+    res.json(reports);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/marketing/reports', (req: Request, res: Response): void => {
+  try {
+    const report = req.body;
+    dbService.upsertMarketingReport(report);
+    res.json({ success: true, report });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/marketing/settings', (req: Request, res: Response): void => {
+  try {
+    const key = req.query.key as string | undefined;
+    const settings = dbService.getMarketingSettings(key);
+    res.json(settings);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/marketing/settings', (req: Request, res: Response): void => {
+  try {
+    const { key, value } = req.body;
+    if (!key) {
+      res.status(400).json({ error: 'Missing setting key' });
+      return;
+    }
+    dbService.upsertMarketingSettings(key, value);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// SERVE PRODUCTION STATIC ASSETS (Vite Build in dist/)
+// -------------------------------------------------------------
+const DIST_DIR = path.resolve(process.cwd(), 'dist');
+if (fs.existsSync(DIST_DIR)) {
+  app.use(express.static(DIST_DIR));
+  app.use((req: Request, res: Response, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      res.sendFile(path.resolve(DIST_DIR, 'index.html'));
+    } else {
+      next();
+    }
+  });
+}
+
+export { app };
+
+if (process.env.VERCEL !== '1') {
+  app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`[API Server] LinkedIn Applicant Screening API running on http://127.0.0.1:${PORT}`);
+
+    // Automated EST Daily Batch Rollover:
+    // Runs immediately on startup, and every 15 minutes in background
+    try {
+      const initRotate = dbService.autoRotateDailyBatchesEST();
+      console.log(`[EST Rollover] Initialized for ${initRotate.todayEST} (rotated ${initRotate.rotatedBatches} previous-day batches).`);
+    } catch (err) {
+      console.warn('[EST Rollover] Startup auto-rotation warning:', err);
+    }
+
+    setInterval(() => {
+      try {
+        const res = dbService.autoRotateDailyBatchesEST();
+        if (res.rotatedBatches > 0) {
+          console.log(`[EST Rollover] Auto-rotated ${res.rotatedBatches} daily working batch(es) for date rollover to ${res.todayEST}.`);
+        }
+      } catch (err) {
+        console.warn('[EST Rollover] Background auto-rotation warning:', err);
+      }
+    }, 15 * 60 * 1000);
+  });
+}
