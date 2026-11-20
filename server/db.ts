@@ -4404,6 +4404,29 @@ export class DatabaseService {
     };
   }
 
+  getApplicantCountsByStatus(filters: {
+    company?: string;
+    batchId?: string;
+    importId?: string;
+    applicationDate?: string;
+  }): { pass: number; fail: number; review: number; duplicate: number; all: number; total: number; uniquePassed: number; allPassed: number } {
+    const counts = this.getApplicantTabCounts({
+      company: filters.company,
+      batchId: filters.batchId || filters.importId,
+      applicationDate: filters.applicationDate,
+    });
+    return {
+      pass: counts.pass,
+      fail: counts.fail,
+      review: counts.review,
+      duplicate: counts.duplicate,
+      all: counts.all,
+      total: counts.all,
+      uniquePassed: counts.uniquePassed,
+      allPassed: counts.allPassed,
+    };
+  }
+
   // --- Distinct Portal Ingestion Dates for Workspace ---
   getIngestionDates(company: string): Array<{ date: string; count: number }> {
     const stmt = this.db.prepare(`

@@ -72,7 +72,7 @@ The **Master Database for AaraTech & ClinisolTech** is an enterprise-grade recru
 
 ### 1. Critical Finding: Hardcoded Fallback Gemini API Key in Source Code (Severity: CRITICAL)
 - **File:** [src/lib/geminiService.ts](file:///c:/Users/yarla/OneDrive/Documents/Desktop/Master%20database%20for%20Aaratech%20&%20Clinisoltech/src/lib/geminiService.ts#L92)
-- **Evidence:** Line 92 includes an unredacted production API key fallback in cleartext: `'AQ.Ab8RN6J-16yjA8HiTLCcFhhqRiqnBIq3v0OnftxP3YxNZieYEQ'`.
+- **Evidence:** Line 92 includes an unredacted production API key fallback in cleartext: `'[REDACTED_GEMINI_KEY]'`.
 - **Impact:** Any user inspecting the client JavaScript bundle in production can retrieve and abuse this API key, leading to quota exhaustion, financial liability, or access misuse.
 - **Remediation:** Remove hardcoded fallback immediately. Require injection exclusively via `import.meta.env.VITE_GEMINI_API_KEY` or runtime user input stored securely in browser session.
 

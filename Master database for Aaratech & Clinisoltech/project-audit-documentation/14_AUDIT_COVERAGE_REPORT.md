@@ -151,7 +151,7 @@ During the documentation completeness audit, six discrepancies were identified a
 - **Documentation Action:** Fully documented as finding **ISS-02** in `12_KNOWN_ISSUES_AND_CHANGE_RISKS.md` and detailed in `04_DATABASE_SCHEMA.md` Section 3.
 
 ### Discrepancy 2: Hardcoded Google Gemini API Key Fallback
-- **Source Code Finding:** At `src/lib/geminiService.ts:L92`, a hardcoded Google Gemini API key (`AQ.Ab8RN6J-16yjA8HiTLCcFhhqRiqnBIq3v0OnftxP3YxNZieYEQ`) is used as a fallback when `localStorage` or environment variables are unset.
+- **Source Code Finding:** At `src/lib/geminiService.ts:L92`, a hardcoded Google Gemini API key (`[REDACTED_GEMINI_KEY]`) is used as a fallback when `localStorage` or environment variables are unset.
 - **Impact:** Critical security exposure allowing unauthorized API usage and potential quota exhaustion.
 - **Documentation Action:** Documented with redaction as finding **SEC-01** (CVSS 9.1 Critical) in `08_SECURITY_AND_PRIVACY_AUDIT.md` and highlighted in `00_EXECUTIVE_SUMMARY.md`.
 

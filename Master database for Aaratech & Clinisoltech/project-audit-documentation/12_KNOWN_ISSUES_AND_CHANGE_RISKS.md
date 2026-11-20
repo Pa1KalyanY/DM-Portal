@@ -26,7 +26,7 @@
 ### ISS-01: Cleartext Fallback Google Gemini API Key in Client Source Code
 - **Severity:** **CRITICAL**
 - **Impact:** Anyone opening the compiled application bundle in browser DevTools can inspect and copy the Google Gemini API key.
-- **Evidence:** Line 92 of [src/lib/geminiService.ts](file:///c:/Users/yarla/OneDrive/Documents/Desktop/Master%20database%20for%20Aaratech%20&%20Clinisoltech/src/lib/geminiService.ts#L92) returns `'AQ.Ab8RN6J-16yjA8HiTLCcFhhqRiqnBIq3v0OnftxP3YxNZieYEQ'`.
+- **Evidence:** Line 92 of [src/lib/geminiService.ts](file:///c:/Users/yarla/OneDrive/Documents/Desktop/Master%20database%20for%20Aaratech%20&%20Clinisoltech/src/lib/geminiService.ts#L92) returns `'[REDACTED_GEMINI_KEY]'`.
 - **Remediation:** Remove line 92 immediately. Enforce environment variable injection (`VITE_GEMINI_API_KEY`) or in-app Settings configuration.
 
 ---
